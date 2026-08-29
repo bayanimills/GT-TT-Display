@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_task_wdt.h"
+#include "display_control.h"
 
 /*********************
  *      DEFINES
@@ -153,6 +154,7 @@ static void finish_loading(void)
     lv_obj_clean(screen);
     home_screen_create();
     lv_scr_load(home_get_screen());
+    display_control_create_power_button();
 
     ESP_LOGI(TAG, "Creating BAP initialization task...");
     xTaskCreate(bap_init_task, "bap_init", 8192, NULL, 10, NULL);
