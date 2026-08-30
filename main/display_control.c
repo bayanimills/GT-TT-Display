@@ -259,7 +259,8 @@ static void display_control_refresh_power_button_visibility(void)
         return;
     }
 
-    bool visible = button_visibility_requested && current_config.power_button_corner != DISPLAY_POWER_BUTTON_HIDDEN;
+    bool visible = display_button_visibility_should_show(current_config.power_button_corner,
+                                                         button_visibility_requested);
     if (visible) {
         lv_obj_clear_flag(power_button, LV_OBJ_FLAG_HIDDEN);
     } else {
