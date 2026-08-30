@@ -16,8 +16,12 @@
 #define DISPLAY_NVS_ENABLED_KEY "disp_sched"
 #define DISPLAY_NVS_OFF_KEY "disp_off"
 #define DISPLAY_NVS_ON_KEY "disp_on"
+#define DISPLAY_NVS_CORNER_KEY "disp_corner"
 #define DISPLAY_DEFAULT_OFF_MINUTE (22U * 60U)
 #define DISPLAY_DEFAULT_ON_MINUTE (7U * 60U)
+#define DISPLAY_POWER_BUTTON_SIZE 44
+#define DISPLAY_POWER_BUTTON_HIT_PADDING 6
+#define DISPLAY_POWER_BUTTON_EDGE_INSET 8
 #define DISPLAY_TIMER_PERIOD_MS 30000U
 #define DISPLAY_WAKE_OVERRIDE_US (10LL * 60LL * 1000LL * 1000LL)
 #define VALID_TIME_EPOCH 1672531200
@@ -28,6 +32,7 @@ static display_control_config_t current_config = {
     .schedule_enabled = false,
     .off_minute = DISPLAY_DEFAULT_OFF_MINUTE,
     .on_minute = DISPLAY_DEFAULT_ON_MINUTE,
+    .power_button_corner = DISPLAY_POWER_BUTTON_TOP_RIGHT,
 };
 
 static bool initialized = false;
@@ -42,6 +47,7 @@ static lv_obj_t *power_button = NULL;
 
 static bool display_control_get_local_minute(uint16_t *minute_of_day);
 static void display_control_evaluate(void);
+static void display_control_position_power_button(void);
 static void display_control_load_config(void);
 static esp_err_t display_control_save_config(void);
 static void display_control_set_backlight(bool enabled);
@@ -76,8 +82,9 @@ void display_control_create_power_button(void)
     }
 
     power_button = lv_btn_create(lv_layer_top());
-    lv_obj_set_size(power_button, 44, 44);
-    lv_obj_align(power_button, LV_ALIGN_TOP_RIGHT, -8, 8);
+    lv_obj_set_size(power_button, DISPLAY_POWER_BUTTON_SIZE, DISPLAY_POWER_BUTTON_SIZE);
+    lv_obj_set_ext_click_area(power_button, DISPLAY_POWER_BUTTON_HIT_PADDING);
+    display_control_position_power_button();
     lv_obj_set_style_bg_color(power_button, COLOR_CARD_BG, 0);
     lv_obj_set_style_bg_opa(power_button, LV_OPA_70, 0);
     lv_obj_set_style_border_width(power_button, 1, 0);
@@ -103,13 +110,15 @@ void display_control_get_config(display_control_config_t *config)
 
 esp_err_t display_control_set_config(const display_control_config_t *config)
 {
-    if (!config || config->off_minute >= 1440U || config->on_minute >= 1440U) {
+    if (!config || config->off_minute >= 1440U || config->on_minute >= 1440U ||
+        config->power_button_corner > DISPLAY_POWER_BUTTON_TOP_LEFT) {
         return ESP_ERR_INVALID_ARG;
     }
 
     current_config = *config;
     schedule_state_known = false;
     wake_override_until_us = 0;
+    display_control_position_power_button();
 
     esp_err_t result = display_control_save_config();
     display_control_evaluate();
@@ -161,6 +170,7 @@ static void display_control_load_config(void)
     }
 
     uint8_t enabled = 0;
+    uint8_t corner = DISPLAY_POWER_BUTTON_TOP_RIGHT;
     uint16_t off_minute = DISPLAY_DEFAULT_OFF_MINUTE;
     uint16_t on_minute = DISPLAY_DEFAULT_ON_MINUTE;
 
@@ -172,6 +182,10 @@ static void display_control_load_config(void)
     }
     if (nvs_get_u16(handle, DISPLAY_NVS_ON_KEY, &on_minute) == ESP_OK && on_minute < 1440U) {
         current_config.on_minute = on_minute;
+    }
+    if (nvs_get_u8(handle, DISPLAY_NVS_CORNER_KEY, &corner) == ESP_OK &&
+        corner <= DISPLAY_POWER_BUTTON_TOP_LEFT) {
+        current_config.power_button_corner = (display_power_button_corner_t)corner;
     }
 
     nvs_close(handle);
@@ -194,6 +208,9 @@ static esp_err_t display_control_save_config(void)
         err = nvs_set_u16(handle, DISPLAY_NVS_ON_KEY, current_config.on_minute);
     }
     if (err == ESP_OK) {
+        err = nvs_set_u8(handle, DISPLAY_NVS_CORNER_KEY, (uint8_t)current_config.power_button_corner);
+    }
+    if (err == ESP_OK) {
         err = nvs_commit(handle);
     }
 
@@ -202,6 +219,21 @@ static esp_err_t display_control_save_config(void)
         ESP_LOGE(TAG, "Failed to save display settings: %s", esp_err_to_name(err));
     }
     return err;
+}
+
+static void display_control_position_power_button(void)
+{
+    if (!power_button) {
+        return;
+    }
+
+    if (current_config.power_button_corner == DISPLAY_POWER_BUTTON_TOP_LEFT) {
+        lv_obj_align(power_button, LV_ALIGN_TOP_LEFT,
+                     DISPLAY_POWER_BUTTON_EDGE_INSET, DISPLAY_POWER_BUTTON_EDGE_INSET);
+    } else {
+        lv_obj_align(power_button, LV_ALIGN_TOP_RIGHT,
+                     -DISPLAY_POWER_BUTTON_EDGE_INSET, DISPLAY_POWER_BUTTON_EDGE_INSET);
+    }
 }
 
 static void display_control_set_backlight(bool enabled)

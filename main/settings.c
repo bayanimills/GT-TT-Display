@@ -34,6 +34,7 @@ static lv_obj_t *timezone_dropdown = NULL;
 static lv_obj_t *display_schedule_checkbox = NULL;
 static lv_obj_t *display_off_dropdown = NULL;
 static lv_obj_t *display_on_dropdown = NULL;
+static lv_obj_t *display_corner_dropdown = NULL;
 static lv_obj_t *sys_overlay = NULL;
 static int diag_counter = 0;
 
@@ -85,6 +86,10 @@ static const char *display_time_options =
     "3:00 PM\n3:30 PM\n4:00 PM\n4:30 PM\n5:00 PM\n5:30 PM\n"
     "6:00 PM\n6:30 PM\n7:00 PM\n7:30 PM\n8:00 PM\n8:30 PM\n"
     "9:00 PM\n9:30 PM\n10:00 PM\n10:30 PM\n11:00 PM\n11:30 PM";
+
+static const char *display_corner_options =
+    "Upper Right\n"
+    "Upper Left";
 
 #define SETTINGS_NVS_NAMESPACE "settings"
 #define SETTINGS_NVS_TZ_INDEX_KEY "tz_index"
@@ -691,7 +696,7 @@ void settings_screen_create(void)
     display_control_get_config(&display_config);
 
     lv_obj_t *display_section = lv_obj_create(main_cont);
-    lv_obj_set_size(display_section, 680, 130);
+    lv_obj_set_size(display_section, 680, 170);
     lv_obj_align(display_section, LV_ALIGN_TOP_MID, 0, 480);
     lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(display_section, 0, 0);
@@ -744,12 +749,27 @@ void settings_screen_create(void)
     lv_obj_set_style_text_font(display_on_dropdown, &lv_font_montserrat_14, 0);
     lv_obj_add_event_cb(display_on_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
+    lv_obj_t *corner_label = lv_label_create(display_section);
+    lv_label_set_text(corner_label, "Power button");
+    lv_obj_set_style_text_color(corner_label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(corner_label, &lv_font_montserrat_16, 0);
+    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 122);
+
+    display_corner_dropdown = lv_dropdown_create(display_section);
+    lv_obj_set_size(display_corner_dropdown, 180, 36);
+    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 130, 115);
+    lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
+    lv_dropdown_set_selected(display_corner_dropdown, (uint16_t)display_config.power_button_corner);
+    lv_obj_set_style_text_color(display_corner_dropdown, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(display_corner_dropdown, &lv_font_montserrat_14, 0);
+    lv_obj_add_event_cb(display_corner_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
+
     update_display_schedule_controls();
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
     lv_obj_set_size(ota_section, 680, 160);
-    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 620);
+    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 660);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -846,6 +866,7 @@ void settings_screen_destroy(void)
         display_schedule_checkbox = NULL;
         display_off_dropdown = NULL;
         display_on_dropdown = NULL;
+        display_corner_dropdown = NULL;
         ota_update_btn = NULL;
         ota_status_label = NULL;
         ota_progress_bar = NULL;
@@ -1033,7 +1054,8 @@ void settings_timezone_changed(lv_event_t *e)
 static void settings_display_schedule_changed(lv_event_t *e)
 {
     LV_UNUSED(e);
-    if (!display_schedule_checkbox || !display_off_dropdown || !display_on_dropdown) {
+    if (!display_schedule_checkbox || !display_off_dropdown || !display_on_dropdown ||
+        !display_corner_dropdown) {
         return;
     }
 
@@ -1041,6 +1063,7 @@ static void settings_display_schedule_changed(lv_event_t *e)
         .schedule_enabled = lv_obj_has_state(display_schedule_checkbox, LV_STATE_CHECKED),
         .off_minute = (uint16_t)(lv_dropdown_get_selected(display_off_dropdown) * 30U),
         .on_minute = (uint16_t)(lv_dropdown_get_selected(display_on_dropdown) * 30U),
+        .power_button_corner = (display_power_button_corner_t)lv_dropdown_get_selected(display_corner_dropdown),
     };
 
     esp_err_t err = display_control_set_config(&config);

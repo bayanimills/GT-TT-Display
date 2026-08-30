@@ -204,7 +204,8 @@ uint8_t current = lcd_backlight_get_brightness();
 
 ### Display Power and Schedule
 
-- Tap the power icon in the upper-right corner to turn off the backlight.
+- Tap the power icon in either upper corner to turn off the backlight. The upper-right is the default, and Settings can move it to the upper-left.
+- The visible icon is 44 by 44 pixels with a 56 by 56 pixel touch zone, inset 8 pixels from the top and selected side.
 - Touch anywhere while the screen is dark to wake it. The wake touch is consumed so it cannot activate an unseen control.
 - Enable a daily schedule in Settings and choose on/off times in 30-minute increments.
 - Overnight schedules are supported. A touch wake during scheduled darkness keeps the display on for ten minutes.
