@@ -19,9 +19,15 @@
 #define DISPLAY_NVS_CORNER_KEY "disp_corner"
 #define DISPLAY_DEFAULT_OFF_MINUTE (22U * 60U)
 #define DISPLAY_DEFAULT_ON_MINUTE (7U * 60U)
+#define DISPLAY_CONTENT_HORIZONTAL_MARGIN 30
+#define DISPLAY_CONTENT_TOP 16
+#define DISPLAY_CONTENT_SAFE_INSET 8
 #define DISPLAY_POWER_BUTTON_SIZE 44
 #define DISPLAY_POWER_BUTTON_HIT_PADDING 6
-#define DISPLAY_POWER_BUTTON_EDGE_INSET 8
+#define DISPLAY_POWER_BUTTON_HORIZONTAL_INSET \
+    (DISPLAY_CONTENT_HORIZONTAL_MARGIN + DISPLAY_CONTENT_SAFE_INSET + DISPLAY_POWER_BUTTON_HIT_PADDING)
+#define DISPLAY_POWER_BUTTON_VERTICAL_INSET \
+    (DISPLAY_CONTENT_TOP + DISPLAY_CONTENT_SAFE_INSET + DISPLAY_POWER_BUTTON_HIT_PADDING)
 #define DISPLAY_TIMER_PERIOD_MS 30000U
 #define DISPLAY_WAKE_OVERRIDE_US (10LL * 60LL * 1000LL * 1000LL)
 #define VALID_TIME_EPOCH 1672531200
@@ -44,10 +50,17 @@ static bool sntp_started = false;
 static int64_t wake_override_until_us = 0;
 static lv_timer_t *schedule_timer = NULL;
 static lv_obj_t *power_button = NULL;
+static bool button_visibility_requested = true;
+static const lv_point_t display_off_slash_points[] = {
+    {2, 2},
+    {21, 19},
+};
 
 static bool display_control_get_local_minute(uint16_t *minute_of_day);
 static void display_control_evaluate(void);
+static void display_control_create_display_off_icon(lv_obj_t *parent);
 static void display_control_position_power_button(void);
+static void display_control_refresh_power_button_visibility(void);
 static void display_control_load_config(void);
 static esp_err_t display_control_save_config(void);
 static void display_control_set_backlight(bool enabled);
@@ -94,24 +107,14 @@ void display_control_create_power_button(void)
     lv_obj_add_flag(power_button, LV_OBJ_FLAG_FLOATING);
     lv_obj_add_event_cb(power_button, display_control_power_clicked, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *label = lv_label_create(power_button);
-    lv_label_set_text(label, LV_SYMBOL_POWER);
-    lv_obj_set_style_text_color(label, COLOR_ACCENT, 0);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
-    lv_obj_center(label);
+    display_control_create_display_off_icon(power_button);
+    display_control_refresh_power_button_visibility();
 }
 
 void display_control_set_power_button_visible(bool visible)
 {
-    if (!power_button) {
-        return;
-    }
-
-    if (visible) {
-        lv_obj_clear_flag(power_button, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(power_button, LV_OBJ_FLAG_HIDDEN);
-    }
+    button_visibility_requested = visible;
+    display_control_refresh_power_button_visibility();
 }
 
 void display_control_get_config(display_control_config_t *config)
@@ -124,7 +127,7 @@ void display_control_get_config(display_control_config_t *config)
 esp_err_t display_control_set_config(const display_control_config_t *config)
 {
     if (!config || config->off_minute >= 1440U || config->on_minute >= 1440U ||
-        config->power_button_corner > DISPLAY_POWER_BUTTON_TOP_LEFT) {
+        config->power_button_corner > DISPLAY_POWER_BUTTON_HIDDEN) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -132,6 +135,7 @@ esp_err_t display_control_set_config(const display_control_config_t *config)
     schedule_state_known = false;
     wake_override_until_us = 0;
     display_control_position_power_button();
+    display_control_refresh_power_button_visibility();
 
     esp_err_t result = display_control_save_config();
     display_control_evaluate();
@@ -197,7 +201,7 @@ static void display_control_load_config(void)
         current_config.on_minute = on_minute;
     }
     if (nvs_get_u8(handle, DISPLAY_NVS_CORNER_KEY, &corner) == ESP_OK &&
-        corner <= DISPLAY_POWER_BUTTON_TOP_LEFT) {
+        corner <= DISPLAY_POWER_BUTTON_HIDDEN) {
         current_config.power_button_corner = (display_power_button_corner_t)corner;
     }
 
@@ -236,17 +240,81 @@ static esp_err_t display_control_save_config(void)
 
 static void display_control_position_power_button(void)
 {
-    if (!power_button) {
+    if (!power_button || current_config.power_button_corner == DISPLAY_POWER_BUTTON_HIDDEN) {
         return;
     }
 
     if (current_config.power_button_corner == DISPLAY_POWER_BUTTON_TOP_LEFT) {
         lv_obj_align(power_button, LV_ALIGN_TOP_LEFT,
-                     DISPLAY_POWER_BUTTON_EDGE_INSET, DISPLAY_POWER_BUTTON_EDGE_INSET);
+                     DISPLAY_POWER_BUTTON_HORIZONTAL_INSET, DISPLAY_POWER_BUTTON_VERTICAL_INSET);
     } else {
         lv_obj_align(power_button, LV_ALIGN_TOP_RIGHT,
-                     -DISPLAY_POWER_BUTTON_EDGE_INSET, DISPLAY_POWER_BUTTON_EDGE_INSET);
+                     -DISPLAY_POWER_BUTTON_HORIZONTAL_INSET, DISPLAY_POWER_BUTTON_VERTICAL_INSET);
     }
+}
+
+static void display_control_refresh_power_button_visibility(void)
+{
+    if (!power_button) {
+        return;
+    }
+
+    bool visible = button_visibility_requested && current_config.power_button_corner != DISPLAY_POWER_BUTTON_HIDDEN;
+    if (visible) {
+        lv_obj_clear_flag(power_button, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(power_button, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void display_control_create_display_off_icon(lv_obj_t *parent)
+{
+    lv_obj_t *icon = lv_obj_create(parent);
+    lv_obj_set_size(icon, 24, 22);
+    lv_obj_center(icon);
+    lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(icon, 0, 0);
+    lv_obj_set_style_pad_all(icon, 0, 0);
+    lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *screen = lv_obj_create(icon);
+    lv_obj_set_size(screen, 20, 14);
+    lv_obj_align(screen, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(screen, 2, 0);
+    lv_obj_set_style_border_color(screen, COLOR_ACCENT, 0);
+    lv_obj_set_style_radius(screen, 2, 0);
+    lv_obj_set_style_pad_all(screen, 0, 0);
+    lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *stand = lv_obj_create(icon);
+    lv_obj_set_size(stand, 2, 4);
+    lv_obj_align(stand, LV_ALIGN_TOP_MID, 0, 13);
+    lv_obj_set_style_bg_color(stand, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(stand, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(stand, 0, 0);
+    lv_obj_set_style_radius(stand, 0, 0);
+    lv_obj_set_style_pad_all(stand, 0, 0);
+    lv_obj_clear_flag(stand, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *foot = lv_obj_create(icon);
+    lv_obj_set_size(foot, 10, 2);
+    lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(foot, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(foot, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(foot, 0, 0);
+    lv_obj_set_style_radius(foot, 0, 0);
+    lv_obj_set_style_pad_all(foot, 0, 0);
+    lv_obj_clear_flag(foot, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *slash = lv_line_create(icon);
+    lv_line_set_points(slash, display_off_slash_points,
+                       sizeof(display_off_slash_points) / sizeof(display_off_slash_points[0]));
+    lv_obj_set_style_line_color(slash, COLOR_ACCENT, 0);
+    lv_obj_set_style_line_width(slash, 2, 0);
+    lv_obj_set_style_line_rounded(slash, true, 0);
+    lv_obj_clear_flag(slash, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(slash);
 }
 
 static void display_control_set_backlight(bool enabled)

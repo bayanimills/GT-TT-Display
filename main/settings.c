@@ -89,7 +89,8 @@ static const char *display_time_options =
 
 static const char *display_corner_options =
     "Upper Right\n"
-    "Upper Left";
+    "Upper Left\n"
+    "Hidden";
 
 #define SETTINGS_NVS_NAMESPACE "settings"
 #define SETTINGS_NVS_TZ_INDEX_KEY "tz_index"
