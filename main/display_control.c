@@ -51,10 +51,6 @@ static int64_t wake_override_until_us = 0;
 static lv_timer_t *schedule_timer = NULL;
 static lv_obj_t *power_button = NULL;
 static bool button_visibility_requested = true;
-static const lv_point_t display_off_slash_points[] = {
-    {2, 2},
-    {21, 19},
-};
 
 static bool display_control_get_local_minute(uint16_t *minute_of_day);
 static void display_control_evaluate(void);
@@ -307,15 +303,6 @@ static void display_control_create_display_off_icon(lv_obj_t *parent)
     lv_obj_set_style_radius(foot, 0, 0);
     lv_obj_set_style_pad_all(foot, 0, 0);
     lv_obj_clear_flag(foot, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t *slash = lv_line_create(icon);
-    lv_line_set_points(slash, display_off_slash_points,
-                       sizeof(display_off_slash_points) / sizeof(display_off_slash_points[0]));
-    lv_obj_set_style_line_color(slash, COLOR_ACCENT, 0);
-    lv_obj_set_style_line_width(slash, 2, 0);
-    lv_obj_set_style_line_rounded(slash, true, 0);
-    lv_obj_clear_flag(slash, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_center(slash);
 }
 
 static void display_control_set_backlight(bool enabled)

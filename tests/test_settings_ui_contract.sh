@@ -7,7 +7,10 @@ display_file="$repo_dir/main/display_control.c"
 display_header="$repo_dir/main/display_button_visibility.h"
 
 test "$(rg -c 'style_settings_dropdown\(' "$settings_file")" -eq 5
-! rg -q 'update_display_schedule_controls' "$settings_file"
+if rg -q 'update_display_schedule_controls' "$settings_file"; then
+    echo "schedule controls must remain editable while scheduling is disabled" >&2
+    exit 1
+fi
 rg -q 'display_control_set_power_button_visible\(false\)' "$settings_file"
 rg -q 'display_control_set_power_button_visible\(true\)' "$settings_file"
 rg -q 'DISPLAY_DEFAULT_OFF_MINUTE \(22U \* 60U\)' "$display_file"
@@ -17,5 +20,11 @@ rg -q '"Upper Left\\n"' "$settings_file"
 rg -q '"Hidden"' "$settings_file"
 rg -q 'DISPLAY_POWER_BUTTON_HIDDEN = 2' "$display_header"
 rg -q 'display_button_visibility_should_show' "$display_file"
+rg -q 'lv_obj_set_size\(screen, 20, 14\)' "$display_file"
+rg -q 'lv_obj_align\(screen, LV_ALIGN_TOP_MID, 0, 0\)' "$display_file"
+if rg -q 'display_off_slash_points|lv_line_create' "$display_file"; then
+    echo "display-off control must use a plain monitor without a slash" >&2
+    exit 1
+fi
 
 echo "settings UI contract tests passed"
