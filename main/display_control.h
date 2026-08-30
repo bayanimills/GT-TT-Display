@@ -19,6 +19,7 @@ typedef struct {
 
 esp_err_t display_control_init(void);
 void display_control_create_power_button(void);
+void display_control_set_power_button_visible(bool visible);
 void display_control_get_config(display_control_config_t *config);
 esp_err_t display_control_set_config(const display_control_config_t *config);
 bool display_control_is_backlight_on(void);

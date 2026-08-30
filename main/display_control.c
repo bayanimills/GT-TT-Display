@@ -101,6 +101,19 @@ void display_control_create_power_button(void)
     lv_obj_center(label);
 }
 
+void display_control_set_power_button_visible(bool visible)
+{
+    if (!power_button) {
+        return;
+    }
+
+    if (visible) {
+        lv_obj_clear_flag(power_button, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(power_button, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 void display_control_get_config(display_control_config_t *config)
 {
     if (config) {

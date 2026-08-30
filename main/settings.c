@@ -95,7 +95,34 @@ static const char *display_corner_options =
 #define SETTINGS_NVS_TZ_INDEX_KEY "tz_index"
 
 static void settings_display_schedule_changed(lv_event_t *e);
-static void update_display_schedule_controls(void);
+
+static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
+{
+    lv_obj_set_style_bg_color(dropdown, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dropdown, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(dropdown, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(dropdown, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(dropdown, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_radius(dropdown, 8, LV_PART_MAIN);
+    lv_obj_set_style_text_color(dropdown, COLOR_TEXT_PRIMARY, LV_PART_MAIN);
+    lv_obj_set_style_text_font(dropdown, font, LV_PART_MAIN);
+    lv_obj_set_style_text_color(dropdown, COLOR_ACCENT, LV_PART_INDICATOR);
+
+    lv_obj_t *list = lv_dropdown_get_list(dropdown);
+    if (list) {
+        lv_obj_set_style_bg_color(list, COLOR_CARD_BG, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_width(list, 1, LV_PART_MAIN);
+        lv_obj_set_style_border_color(list, COLOR_ACCENT, LV_PART_MAIN);
+        lv_obj_set_style_radius(list, 8, LV_PART_MAIN);
+        lv_obj_set_style_text_color(list, COLOR_TEXT_PRIMARY, LV_PART_MAIN);
+        lv_obj_set_style_text_font(list, font, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(list, COLOR_ACCENT, LV_PART_SELECTED);
+        lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SELECTED);
+        lv_obj_set_style_text_color(list, COLOR_TEXT_ON_ACCENT, LV_PART_SELECTED);
+        lv_obj_set_style_text_font(list, font, LV_PART_SELECTED);
+    }
+}
 
 static lv_obj_t *create_settings_button(lv_obj_t *parent, const char *text, lv_event_cb_t event_cb, bool active)
 {
@@ -316,22 +343,6 @@ void settings_initialize(void)
     settings_initialized = true;
 }
 
-static void update_display_schedule_controls(void)
-{
-    if (!display_schedule_checkbox || !display_off_dropdown || !display_on_dropdown) {
-        return;
-    }
-
-    bool enabled = lv_obj_has_state(display_schedule_checkbox, LV_STATE_CHECKED);
-    if (enabled) {
-        lv_obj_clear_state(display_off_dropdown, LV_STATE_DISABLED);
-        lv_obj_clear_state(display_on_dropdown, LV_STATE_DISABLED);
-    } else {
-        lv_obj_add_state(display_off_dropdown, LV_STATE_DISABLED);
-        lv_obj_add_state(display_on_dropdown, LV_STATE_DISABLED);
-    }
-}
-
 static void update_fan_controls(void)
 {
     if (!fan_slider || !fan_value_label)
@@ -523,6 +534,7 @@ void settings_screen_create(void)
     }
 
     settings_initialize();
+    display_control_set_power_button_visible(false);
 
     settings_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(settings_screen, COLOR_BACKGROUND, 0);
@@ -682,14 +694,7 @@ void settings_screen_create(void)
     lv_obj_align(timezone_dropdown, LV_ALIGN_TOP_LEFT, 140, -4);
     lv_dropdown_set_options(timezone_dropdown, timezone_options);
     lv_dropdown_set_selected(timezone_dropdown, current_timezone_index);
-    lv_obj_set_style_bg_color(timezone_dropdown, COLOR_CARD_BG, 0);
-    lv_obj_set_style_bg_opa(timezone_dropdown, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(timezone_dropdown, 1, 0);
-    lv_obj_set_style_border_color(timezone_dropdown, COLOR_ACCENT, 0);
-    lv_obj_set_style_border_opa(timezone_dropdown, LV_OPA_50, 0);
-    lv_obj_set_style_radius(timezone_dropdown, 8, 0);
-    lv_obj_set_style_text_color(timezone_dropdown, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(timezone_dropdown, &lv_font_montserrat_16, 0);
+    style_settings_dropdown(timezone_dropdown, &lv_font_montserrat_16);
     lv_obj_add_event_cb(timezone_dropdown, settings_timezone_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     display_control_config_t display_config;
@@ -730,8 +735,7 @@ void settings_screen_create(void)
     lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 65, 68);
     lv_dropdown_set_options(display_off_dropdown, display_time_options);
     lv_dropdown_set_selected(display_off_dropdown, display_config.off_minute / 30U);
-    lv_obj_set_style_text_color(display_off_dropdown, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(display_off_dropdown, &lv_font_montserrat_14, 0);
+    style_settings_dropdown(display_off_dropdown, &lv_font_montserrat_14);
     lv_obj_add_event_cb(display_off_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *on_label = lv_label_create(display_section);
@@ -745,8 +749,7 @@ void settings_screen_create(void)
     lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 330, 68);
     lv_dropdown_set_options(display_on_dropdown, display_time_options);
     lv_dropdown_set_selected(display_on_dropdown, display_config.on_minute / 30U);
-    lv_obj_set_style_text_color(display_on_dropdown, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(display_on_dropdown, &lv_font_montserrat_14, 0);
+    style_settings_dropdown(display_on_dropdown, &lv_font_montserrat_14);
     lv_obj_add_event_cb(display_on_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *corner_label = lv_label_create(display_section);
@@ -760,11 +763,8 @@ void settings_screen_create(void)
     lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 130, 115);
     lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
     lv_dropdown_set_selected(display_corner_dropdown, (uint16_t)display_config.power_button_corner);
-    lv_obj_set_style_text_color(display_corner_dropdown, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(display_corner_dropdown, &lv_font_montserrat_14, 0);
+    style_settings_dropdown(display_corner_dropdown, &lv_font_montserrat_14);
     lv_obj_add_event_cb(display_corner_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
-    update_display_schedule_controls();
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
@@ -872,6 +872,8 @@ void settings_screen_destroy(void)
         ota_progress_bar = NULL;
         ota_version_label = NULL;
     }
+
+    display_control_set_power_button_visible(true);
 }
 
 lv_obj_t *settings_get_screen(void)
@@ -1070,7 +1072,6 @@ static void settings_display_schedule_changed(lv_event_t *e)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save display schedule: %s", esp_err_to_name(err));
     }
-    update_display_schedule_controls();
 }
 
 void settings_night_clicked(lv_event_t *e)
