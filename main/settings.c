@@ -35,6 +35,7 @@ static lv_obj_t *display_schedule_checkbox = NULL;
 static lv_obj_t *display_off_dropdown = NULL;
 static lv_obj_t *display_on_dropdown = NULL;
 static lv_obj_t *display_corner_dropdown = NULL;
+static lv_obj_t *display_button_visuals_checkbox = NULL;
 static lv_obj_t *sys_overlay = NULL;
 static int diag_counter = 0;
 
@@ -89,8 +90,7 @@ static const char *display_time_options =
 
 static const char *display_corner_options =
     "Upper Right\n"
-    "Upper Left\n"
-    "Hidden";
+    "Upper Left";
 
 #define SETTINGS_NVS_NAMESPACE "settings"
 #define SETTINGS_NVS_TZ_INDEX_KEY "tz_index"
@@ -702,7 +702,7 @@ void settings_screen_create(void)
     display_control_get_config(&display_config);
 
     lv_obj_t *display_section = lv_obj_create(main_cont);
-    lv_obj_set_size(display_section, 680, 170);
+    lv_obj_set_size(display_section, 680, 205);
     lv_obj_align(display_section, LV_ALIGN_TOP_MID, 0, 480);
     lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(display_section, 0, 0);
@@ -754,18 +754,35 @@ void settings_screen_create(void)
     lv_obj_add_event_cb(display_on_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *corner_label = lv_label_create(display_section);
-    lv_label_set_text(corner_label, "Power button");
+    lv_label_set_text(corner_label, "Button position");
     lv_obj_set_style_text_color(corner_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(corner_label, &lv_font_montserrat_16, 0);
     lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 122);
 
     display_corner_dropdown = lv_dropdown_create(display_section);
     lv_obj_set_size(display_corner_dropdown, 180, 36);
-    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 130, 115);
+    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 150, 115);
     lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
     lv_dropdown_set_selected(display_corner_dropdown, (uint16_t)display_config.power_button_corner);
     style_settings_dropdown(display_corner_dropdown, &lv_font_montserrat_14);
     lv_obj_add_event_cb(display_corner_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
+
+    display_button_visuals_checkbox = lv_checkbox_create(display_section);
+    lv_checkbox_set_text(display_button_visuals_checkbox, "Show display-off button");
+    lv_obj_set_style_text_color(display_button_visuals_checkbox, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(display_button_visuals_checkbox, &lv_font_montserrat_16, 0);
+    lv_obj_align(display_button_visuals_checkbox, LV_ALIGN_TOP_LEFT, 370, 120);
+    if (display_config.power_button_visuals_visible) {
+        lv_obj_add_state(display_button_visuals_checkbox, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(display_button_visuals_checkbox, settings_display_schedule_changed,
+                        LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *display_button_visuals_hint = lv_label_create(display_section);
+    lv_label_set_text(display_button_visuals_hint, "When hidden, the selected corner still works");
+    lv_obj_set_style_text_color(display_button_visuals_hint, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(display_button_visuals_hint, &lv_font_montserrat_14, 0);
+    lv_obj_align(display_button_visuals_hint, LV_ALIGN_TOP_LEFT, 370, 154);
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
@@ -868,6 +885,7 @@ void settings_screen_destroy(void)
         display_off_dropdown = NULL;
         display_on_dropdown = NULL;
         display_corner_dropdown = NULL;
+        display_button_visuals_checkbox = NULL;
         ota_update_btn = NULL;
         ota_status_label = NULL;
         ota_progress_bar = NULL;
@@ -1058,7 +1076,7 @@ static void settings_display_schedule_changed(lv_event_t *e)
 {
     LV_UNUSED(e);
     if (!display_schedule_checkbox || !display_off_dropdown || !display_on_dropdown ||
-        !display_corner_dropdown) {
+        !display_corner_dropdown || !display_button_visuals_checkbox) {
         return;
     }
 
@@ -1067,6 +1085,8 @@ static void settings_display_schedule_changed(lv_event_t *e)
         .off_minute = (uint16_t)(lv_dropdown_get_selected(display_off_dropdown) * 30U),
         .on_minute = (uint16_t)(lv_dropdown_get_selected(display_on_dropdown) * 30U),
         .power_button_corner = (display_power_button_corner_t)lv_dropdown_get_selected(display_corner_dropdown),
+        .power_button_visuals_visible = lv_obj_has_state(display_button_visuals_checkbox,
+                                                         LV_STATE_CHECKED),
     };
 
     esp_err_t err = display_control_set_config(&config);

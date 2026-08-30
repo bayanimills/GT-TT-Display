@@ -17,6 +17,7 @@
 #define DISPLAY_NVS_OFF_KEY "disp_off"
 #define DISPLAY_NVS_ON_KEY "disp_on"
 #define DISPLAY_NVS_CORNER_KEY "disp_corner"
+#define DISPLAY_NVS_VISUALS_KEY "disp_icon"
 #define DISPLAY_DEFAULT_OFF_MINUTE (22U * 60U)
 #define DISPLAY_DEFAULT_ON_MINUTE (7U * 60U)
 #define DISPLAY_CONTENT_HORIZONTAL_MARGIN 30
@@ -39,6 +40,7 @@ static display_control_config_t current_config = {
     .off_minute = DISPLAY_DEFAULT_OFF_MINUTE,
     .on_minute = DISPLAY_DEFAULT_ON_MINUTE,
     .power_button_corner = DISPLAY_POWER_BUTTON_TOP_RIGHT,
+    .power_button_visuals_visible = true,
 };
 
 static bool initialized = false;
@@ -123,7 +125,7 @@ void display_control_get_config(display_control_config_t *config)
 esp_err_t display_control_set_config(const display_control_config_t *config)
 {
     if (!config || config->off_minute >= 1440U || config->on_minute >= 1440U ||
-        config->power_button_corner > DISPLAY_POWER_BUTTON_HIDDEN) {
+        config->power_button_corner > DISPLAY_POWER_BUTTON_TOP_LEFT) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -184,8 +186,10 @@ static void display_control_load_config(void)
 
     uint8_t enabled = 0;
     uint8_t corner = DISPLAY_POWER_BUTTON_TOP_RIGHT;
+    uint8_t show_visuals = 1U;
     uint16_t off_minute = DISPLAY_DEFAULT_OFF_MINUTE;
     uint16_t on_minute = DISPLAY_DEFAULT_ON_MINUTE;
+    bool legacy_hidden = false;
 
     if (nvs_get_u8(handle, DISPLAY_NVS_ENABLED_KEY, &enabled) == ESP_OK) {
         current_config.schedule_enabled = enabled != 0;
@@ -196,9 +200,18 @@ static void display_control_load_config(void)
     if (nvs_get_u16(handle, DISPLAY_NVS_ON_KEY, &on_minute) == ESP_OK && on_minute < 1440U) {
         current_config.on_minute = on_minute;
     }
-    if (nvs_get_u8(handle, DISPLAY_NVS_CORNER_KEY, &corner) == ESP_OK &&
-        corner <= DISPLAY_POWER_BUTTON_HIDDEN) {
-        current_config.power_button_corner = (display_power_button_corner_t)corner;
+    if (nvs_get_u8(handle, DISPLAY_NVS_CORNER_KEY, &corner) == ESP_OK) {
+        if (corner <= DISPLAY_POWER_BUTTON_TOP_LEFT) {
+            current_config.power_button_corner = (display_power_button_corner_t)corner;
+        } else if (corner == DISPLAY_POWER_BUTTON_HIDDEN_LEGACY) {
+            current_config.power_button_corner = DISPLAY_POWER_BUTTON_TOP_RIGHT;
+            current_config.power_button_visuals_visible = false;
+            legacy_hidden = true;
+        }
+    }
+    if (!legacy_hidden &&
+        nvs_get_u8(handle, DISPLAY_NVS_VISUALS_KEY, &show_visuals) == ESP_OK) {
+        current_config.power_button_visuals_visible = show_visuals != 0U;
     }
 
     nvs_close(handle);
@@ -224,6 +237,10 @@ static esp_err_t display_control_save_config(void)
         err = nvs_set_u8(handle, DISPLAY_NVS_CORNER_KEY, (uint8_t)current_config.power_button_corner);
     }
     if (err == ESP_OK) {
+        err = nvs_set_u8(handle, DISPLAY_NVS_VISUALS_KEY,
+                         current_config.power_button_visuals_visible ? 1U : 0U);
+    }
+    if (err == ESP_OK) {
         err = nvs_commit(handle);
     }
 
@@ -236,7 +253,7 @@ static esp_err_t display_control_save_config(void)
 
 static void display_control_position_power_button(void)
 {
-    if (!power_button || current_config.power_button_corner == DISPLAY_POWER_BUTTON_HIDDEN) {
+    if (!power_button) {
         return;
     }
 
@@ -255,13 +272,17 @@ static void display_control_refresh_power_button_visibility(void)
         return;
     }
 
-    bool visible = display_button_visibility_should_show(current_config.power_button_corner,
-                                                         button_visibility_requested);
-    if (visible) {
+    display_button_visibility_t visibility = display_button_visibility_resolve(
+        button_visibility_requested, current_config.power_button_visuals_visible);
+
+    if (visibility.interactive) {
         lv_obj_clear_flag(power_button, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(power_button, LV_OBJ_FLAG_HIDDEN);
     }
+
+    lv_obj_set_style_opa(power_button,
+                         visibility.show_visuals ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 }
 
 static void display_control_create_display_off_icon(lv_obj_t *parent)

@@ -11,6 +11,7 @@ typedef struct {
     uint16_t off_minute;
     uint16_t on_minute;
     display_power_button_corner_t power_button_corner;
+    bool power_button_visuals_visible;
 } display_control_config_t;
 
 esp_err_t display_control_init(void);
