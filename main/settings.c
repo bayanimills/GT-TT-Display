@@ -703,7 +703,7 @@ void settings_screen_create(void)
     display_control_get_config(&display_config);
 
     lv_obj_t *display_section = lv_obj_create(main_cont);
-    lv_obj_set_size(display_section, 680, 205);
+    lv_obj_set_size(display_section, 680, 250);
     lv_obj_align(display_section, LV_ALIGN_TOP_MID, 0, 480);
     lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(display_section, 0, 0);
@@ -727,28 +727,28 @@ void settings_screen_create(void)
     lv_obj_add_event_cb(display_schedule_checkbox, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *off_label = lv_label_create(display_section);
-    lv_label_set_text(off_label, "Off at");
+    lv_label_set_text(off_label, "Turns off at");
     lv_obj_set_style_text_color(off_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(off_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 75);
+    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 70);
 
     display_off_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_off_dropdown, 170, 36);
-    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 65, 68);
+    lv_obj_set_size(display_off_dropdown, 300, 36);
+    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 94);
     lv_dropdown_set_options(display_off_dropdown, display_time_options);
     lv_dropdown_set_selected(display_off_dropdown, display_config.off_minute / 30U);
     style_settings_dropdown(display_off_dropdown, &lv_font_montserrat_14);
     lv_obj_add_event_cb(display_off_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *on_label = lv_label_create(display_section);
-    lv_label_set_text(on_label, "On at");
+    lv_label_set_text(on_label, "Turns on at");
     lv_obj_set_style_text_color(on_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(on_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 270, 75);
+    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 70);
 
     display_on_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_on_dropdown, 170, 36);
-    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 330, 68);
+    lv_obj_set_size(display_on_dropdown, 300, 36);
+    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 94);
     lv_dropdown_set_options(display_on_dropdown, display_time_options);
     lv_dropdown_set_selected(display_on_dropdown, display_config.on_minute / 30U);
     style_settings_dropdown(display_on_dropdown, &lv_font_montserrat_14);
@@ -758,11 +758,11 @@ void settings_screen_create(void)
     lv_label_set_text(corner_label, "Display-off button");
     lv_obj_set_style_text_color(corner_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(corner_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 122);
+    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 142);
 
     display_corner_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_corner_dropdown, 180, 36);
-    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 185, 115);
+    lv_obj_set_size(display_corner_dropdown, 300, 36);
+    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 166);
     lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
     lv_dropdown_set_selected(display_corner_dropdown,
                              (uint16_t)display_button_mode_from_config(
@@ -775,12 +775,14 @@ void settings_screen_create(void)
     lv_label_set_text(display_button_mode_hint, "Hidden keeps the selected corner tappable");
     lv_obj_set_style_text_color(display_button_mode_hint, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(display_button_mode_hint, &lv_font_montserrat_14, 0);
-    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 185, 158);
+    lv_obj_set_width(display_button_mode_hint, 650);
+    lv_label_set_long_mode(display_button_mode_hint, LV_LABEL_LONG_WRAP);
+    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 210);
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
     lv_obj_set_size(ota_section, 680, 160);
-    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 660);
+    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 740);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
