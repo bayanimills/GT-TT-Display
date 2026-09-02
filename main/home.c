@@ -417,6 +417,17 @@ void home_screen_create(void)
     if (theme_get_skin() == THEME_SKIN_GLASS)
     {
         glass_home_create();
+        /* A classic home built before the skin flipped is now orphaned; drop
+         * it unless it is still the loaded screen (the caller loads the glass
+         * one next and destroys through home_screen_destroy). */
+        if (home_screen && lv_scr_act() != home_screen)
+        {
+            lv_obj_del(home_screen);
+            home_screen = NULL;
+            hashrate_label = power_label = temperature_label = efficiency_label = NULL;
+            fan_label = shares_label = bd_label = NULL;
+            hardware_popup = pool_popup = NULL;
+        }
         return;
     }
 
