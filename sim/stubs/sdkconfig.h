@@ -1,0 +1,15 @@
+#pragma once
+/* Values mirrored from the device sdkconfig so the sim matches the panel. */
+#define CONFIG_EXAMPLE_LVGL_PORT_TICK                 2
+#define CONFIG_EXAMPLE_LVGL_PORT_TASK_MAX_DELAY_MS    500
+#define CONFIG_EXAMPLE_LVGL_PORT_TASK_MIN_DELAY_MS    2
+#define CONFIG_EXAMPLE_LVGL_PORT_TASK_STACK_SIZE_KB   6
+#define CONFIG_EXAMPLE_LVGL_PORT_TASK_PRIORITY        2
+#define CONFIG_EXAMPLE_LVGL_PORT_TASK_CORE            (-1)
+#define CONFIG_EXAMPLE_LVGL_PORT_BUF_HEIGHT           100
+#define CONFIG_EXAMPLE_LVGL_PORT_AVOID_TEAR_ENABLE    0
+#define CONFIG_EXAMPLE_LVGL_PORT_ROTATION_DEGREE      0
+#define CONFIG_EXAMPLE_LVGL_PORT_BUF_PSRAM            1
+#define MALLOC_CAP_SPIRAM     (1 << 10)
+#define MALLOC_CAP_INTERNAL   (1 << 11)
+#define MALLOC_CAP_8BIT       (1 << 2)

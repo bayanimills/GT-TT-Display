@@ -46,7 +46,13 @@
  *=========================*/
 
 /*1: use custom malloc/free, 0: use the built-in `lv_mem_alloc()` and `lv_mem_free()`*/
-#define LV_MEM_CUSTOM 0
+/* Was 0, which pinned LVGL to the 48 kB static pool below. The settings screen
+ * already peaked near that ceiling and adding one section tipped it over:
+ * lv_obj_create() starts returning NULL and the next call dereferences it.
+ * malloc routes through the ESP heap instead, where CONFIG_SPIRAM_USE_MALLOC
+ * keeps allocations under CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (16 kB) in fast
+ * internal SRAM and spills anything larger to the 8 MB PSRAM. */
+#define LV_MEM_CUSTOM 1
 #if LV_MEM_CUSTOM == 0
     /*Size of the memory available for `lv_mem_alloc()` in bytes (>= 2kB)*/
     #define LV_MEM_SIZE (48U * 1024U)          /*[bytes]*/

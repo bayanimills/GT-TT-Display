@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turbo Touch Simulator</title>
+<style>
+  :root {
+    --bg: #0b0d10; --panel: #14181d; --line: #232a32;
+    --fg: #e8ecf1; --dim: #8b96a5; --accent: #d4021b;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-size: 13px; }
+  header {
+    display: flex; align-items: baseline; gap: 14px;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: .04em; }
+  header .meta { color: var(--dim); font-size: 12px; }
+  .wrap { display: flex; gap: 16px; padding: 16px; align-items: flex-start; flex-wrap: wrap; }
+
+  .screen { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #000; }
+  canvas { display: block; width: 800px; height: 480px; cursor: crosshair; image-rendering: pixelated; }
+  .screen .bar { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; padding-top: 8px; }
+
+  aside { width: 340px; display: flex; flex-direction: column; gap: 14px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  section h2 { margin: 0 0 9px; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); font-weight: 600; }
+
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .grid.three { grid-template-columns: repeat(3, 1fr); }
+  button {
+    font: inherit; font-size: 12px; padding: 7px 8px; cursor: pointer; color: var(--fg);
+    background: #1b2027; border: 1px solid var(--line); border-radius: 6px; text-align: left;
+  }
+  button:hover { border-color: #3a4552; background: #212832; }
+  button.on { border-color: var(--accent); color: #fff; }
+
+  .slot { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .slot label { flex: 1; color: var(--dim); font-size: 12px; }
+  .slot input[type=color] { width: 40px; height: 24px; padding: 0; border: 1px solid var(--line); background: none; border-radius: 4px; cursor: pointer; }
+  .slot code { color: var(--dim); font-size: 11px; width: 56px; }
+
+  input[type=text] {
+    font: inherit; font-size: 12px; width: 100%; padding: 7px 8px; border-radius: 6px;
+    background: #0e1216; color: var(--fg); border: 1px solid var(--line);
+  }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row input { flex: 1; }
+  .row button { flex: 0 0 auto; }
+
+  pre {
+    margin: 0; max-height: 190px; overflow: auto; font-size: 11px; line-height: 1.45;
+    color: var(--dim); white-space: pre-wrap; word-break: break-word;
+  }
+  .hint { color: var(--dim); font-size: 11px; margin-top: 7px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>TURBO TOUCH SIM</h1>
+  <span class="meta">800&times;480 &middot; ST7262 &middot; GT911 &middot; real <code>main/</code> code, host LVGL</span>
+</header>
+
+<div class="wrap">
+  <div class="screen">
+    <canvas id="screen" width="800" height="480"></canvas>
+    <div class="bar">
+      <span id="stat">connecting…</span>
+      <span id="live">live: —</span>
+    </div>
+  </div>
+
+  <aside>
+    <section>
+      <h2>Theme preset</h2>
+      <div class="grid" id="presets"></div>
+      <div class="hint">Rebuilds the active screen, exactly as <code>theme_set_index()</code> does on the device.</div>
+    </section>
+
+    <section>
+      <h2>Palette</h2>
+      <div id="slots"></div>
+      <div class="hint">Live edits mark the theme custom. They map 1:1 onto the <code>COLOR_*</code> macros in <code>main/home.h</code>.</div>
+    </section>
+
+    <section>
+      <h2>Screen</h2>
+      <div class="grid three" id="screens"></div>
+    </section>
+
+    <section>
+      <h2>Data</h2>
+      <div class="row" style="margin-bottom:6px">
+        <input type="text" id="host" placeholder="192.168.1.50">
+        <button id="liveBtn">Mirror</button>
+      </div>
+      <div class="grid">
+        <button id="demoBtn">Demo values</button>
+        <button id="repaintBtn">Repaint</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <input type="text" id="bap" placeholder="$BAP,RES,hashrate,2450.0*XX">
+        <button id="bapBtn">Send</button>
+      </div>
+      <div class="hint">Mirror polls the Bitaxe's HTTP API and replays it as BAP sentences. Nothing is written to the miner.</div>
+    </section>
+
+    <section>
+      <h2>Sim log</h2>
+      <pre id="log"></pre>
+    </section>
+  </aside>
+</div>
+
+<script>
+const cv  = document.getElementById('screen');
+const ctx = cv.getContext('2d', { alpha: false });
+const img = ctx.createImageData(800, 480);
+let frameNo = 0, frames = 0, lastTick = performance.now(), fps = 0;
+
+function post(path, body) {
+  return fetch(path, { method: 'POST', body: body === undefined ? '' : body });
+}
+const cmd = line => post('/cmd', line);
+
+/* ---- framebuffer stream (RGB565 -> canvas) ---- */
+async function pump() {
+  for (;;) {
+    try {
+      const res = await fetch('/frame?since=' + frameNo);
+      if (res.status === 204) continue;
+      if (!res.ok) { await new Promise(r => setTimeout(r, 500)); continue; }
+      frameNo = parseInt(res.headers.get('X-Frame') || '0', 10);
+      const px = new Uint16Array(await res.arrayBuffer());
+      const d = img.data;
+      for (let i = 0, j = 0; i < px.length; i++, j += 4) {
+        const v = px[i];
+        d[j]     = (v >> 11 & 0x1f) << 3;
+        d[j + 1] = (v >>  5 & 0x3f) << 2;
+        d[j + 2] = (v       & 0x1f) << 3;
+        d[j + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      frames++;
+      const now = performance.now();
+      if (now - lastTick > 1000) {
+        fps = frames / ((now - lastTick) / 1000);
+        frames = 0; lastTick = now;
+      }
+      document.getElementById('stat').textContent =
+        'frame ' + frameNo + ' · ' + fps.toFixed(1) + ' fps';
+    } catch (e) {
+      await new Promise(r => setTimeout(r, 800));
+    }
+  }
+}
+
+/* ---- touch ---- */
+function at(e) {
+  const r = cv.getBoundingClientRect();
+  return [
+    Math.round((e.clientX - r.left) * cv.width  / r.width),
+    Math.round((e.clientY - r.top)  * cv.height / r.height),
+  ];
+}
+let down = false;
+cv.addEventListener('pointerdown', e => {
+  down = true; cv.setPointerCapture(e.pointerId);
+  const [x, y] = at(e); cmd(`T ${x} ${y} 1`);
+});
+cv.addEventListener('pointermove', e => {
+  if (!down) return;
+  const [x, y] = at(e); cmd(`T ${x} ${y} 1`);
+});
+const release = e => {
+  if (!down) return;
+  down = false;
+  const [x, y] = at(e); cmd(`T ${x} ${y} 0`);
+};
+cv.addEventListener('pointerup', release);
+cv.addEventListener('pointercancel', release);
+
+/* ---- controls ---- */
+let presetIdx = 0;
+function buildPresets(names) {
+  const box = document.getElementById('presets');
+  box.innerHTML = '';
+  names.forEach((n, i) => {
+    const b = document.createElement('button');
+    b.textContent = n;
+    b.className = i === presetIdx ? 'on' : '';
+    b.onclick = () => {
+      presetIdx = i;
+      cmd('P ' + i);
+      [...box.children].forEach((c, j) => c.className = j === i ? 'on' : '');
+    };
+    box.appendChild(b);
+  });
+}
+
+function buildSlots(names) {
+  const box = document.getElementById('slots');
+  box.innerHTML = '';
+  names.forEach((n, i) => {
+    const row = document.createElement('div');
+    row.className = 'slot';
+    const lab = document.createElement('label'); lab.textContent = n;
+    const inp = document.createElement('input'); inp.type = 'color'; inp.value = '#000000';
+    const hex = document.createElement('code'); hex.textContent = '';
+    inp.oninput = () => {
+      hex.textContent = inp.value.toUpperCase();
+      cmd(`S ${i} ${inp.value.slice(1)}\nC`);
+    };
+    row.append(lab, hex, inp);
+    box.appendChild(row);
+  });
+}
+
+function buildScreens(names) {
+  const box = document.getElementById('screens');
+  box.innerHTML = '';
+  names.forEach(n => {
+    const b = document.createElement('button');
+    b.textContent = n;
+    b.onclick = () => cmd('N ' + n);
+    box.appendChild(b);
+  });
+}
+
+document.getElementById('demoBtn').onclick     = () => post('/demo');
+document.getElementById('repaintBtn').onclick  = () => cmd('R');
+document.getElementById('bapBtn').onclick = () => {
+  const el = document.getElementById('bap');
+  if (el.value.trim()) { cmd('B ' + el.value.trim()); el.value = ''; }
+};
+document.getElementById('bap').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('bapBtn').click();
+});
+
+let liveOn = false;
+document.getElementById('liveBtn').onclick = () => {
+  liveOn = !liveOn;
+  post('/live', JSON.stringify({ host: document.getElementById('host').value, on: liveOn }));
+};
+
+/* ---- state poll ---- */
+let built = false;
+async function poll() {
+  for (;;) {
+    try {
+      const s = await (await fetch('/state')).json();
+      if (!built) {
+        buildPresets(s.presets); buildSlots(s.slots); buildScreens(s.screens);
+        if (s.liveHost) document.getElementById('host').value = s.liveHost;
+        liveOn = s.liveOn;
+        built = true;
+      }
+      document.getElementById('live').textContent = 'live: ' + s.live;
+      document.getElementById('liveBtn').className = liveOn ? 'on' : '';
+      const log = document.getElementById('log');
+      const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+      log.textContent = s.log.join('\n');
+      if (stick) log.scrollTop = log.scrollHeight;
+    } catch (e) { /* server restarting */ }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+}
+
+pump();
+poll();
+</script>
+</body>
+</html>

@@ -29,6 +29,11 @@ void settings_fan_slider_changed(lv_event_t * e);
 void settings_fan_save_clicked(lv_event_t * e);
 void settings_brightness_slider_changed(lv_event_t * e);
 void settings_timezone_changed(lv_event_t * e);
+void settings_theme_changed(lv_event_t * e);
+
+/* Rebuild the settings screen so a new theme's colours take effect.
+ * Registered with theme_register_reload() at boot. */
+void settings_rebuild_for_theme(void);
 void settings_home_clicked(lv_event_t * e);
 void settings_block_clicked(lv_event_t * e);
 void settings_clock_clicked(lv_event_t * e);

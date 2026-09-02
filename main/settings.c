@@ -30,6 +30,7 @@ static lv_obj_t *fan_save_btn = NULL;
 static lv_obj_t *brightness_slider = NULL;
 static lv_obj_t *brightness_value_label = NULL;
 static lv_obj_t *timezone_dropdown = NULL;
+static lv_obj_t *theme_dropdown = NULL;
 static lv_obj_t *sys_overlay = NULL;
 static int diag_counter = 0;
 
@@ -463,6 +464,67 @@ static void settings_ota_update_clicked(lv_event_t *e)
     }
 }
 
+/* Newline-joined preset names for the dropdown, built once from theme.c so the
+ * list can never drift out of sync with the presets themselves. */
+static const char *theme_dropdown_options(void)
+{
+    static char opts[256];
+    if (opts[0] != 0) {
+        return opts;
+    }
+
+    size_t count = 0;
+    const theme_preset_t *presets = theme_presets(&count);
+    size_t used = 0;
+
+    for (size_t i = 0; i < count && used < sizeof(opts) - 1; i++) {
+        int n = snprintf(opts + used, sizeof(opts) - used, "%s%s",
+                         i ? "\n" : "", presets[i].name);
+        if (n < 0) {
+            break;
+        }
+        used += (size_t) n;
+    }
+    return opts;
+}
+
+/* Applying a theme tears this screen down and builds it again, which must not
+ * happen while LVGL is still dispatching the dropdown's event. lv_async_call
+ * defers it to the next timer tick, once the event has unwound. */
+static void settings_apply_theme_async(void *param)
+{
+    theme_set_index((int) (intptr_t) param);
+}
+
+void settings_theme_changed(lv_event_t *e)
+{
+    uint16_t index = lv_dropdown_get_selected(lv_event_get_target(e));
+    ESP_LOGI(TAG, "Theme selected: %u", (unsigned) index);
+    lv_async_call(settings_apply_theme_async, (void *) (intptr_t) index);
+}
+
+void settings_rebuild_for_theme(void)
+{
+    if (settings_screen == NULL) {
+        return;
+    }
+
+    /* Park on a scratch screen for the swap. Deleting the screen that is
+     * currently loaded leaves LVGL's active-screen pointer dangling, so load
+     * the next one first, exactly as navigation does. */
+    lv_obj_t *scratch = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(scratch, COLOR_BACKGROUND, 0);
+    lv_obj_set_style_bg_opa(scratch, LV_OPA_COVER, 0);
+    lv_scr_load(scratch);
+
+    settings_screen_destroy();
+    settings_screen_create();
+    lv_scr_load(settings_screen);
+    lv_obj_del(scratch);
+
+    ESP_LOGI(TAG, "Rebuilt settings for theme: %s", theme_get_name());
+}
+
 void settings_screen_create(void)
 {
     if (settings_screen != NULL)
@@ -611,9 +673,57 @@ void settings_screen_create(void)
     lv_obj_set_style_text_font(brightness_value_label, &lv_font_montserrat_22, 0);
     lv_obj_align(brightness_value_label, LV_ALIGN_TOP_LEFT, 600, 26);
 
+    lv_obj_t *theme_section = lv_obj_create(main_cont);
+    lv_obj_set_size(theme_section, 680, 110);
+    lv_obj_align(theme_section, LV_ALIGN_TOP_MID, 0, 430);
+    lv_obj_set_style_bg_opa(theme_section, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(theme_section, 0, 0);
+    lv_obj_set_style_pad_all(theme_section, 10, 0);
+    lv_obj_clear_flag(theme_section, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *theme_title = lv_label_create(theme_section);
+    lv_label_set_text(theme_title, "Colour Theme:");
+    lv_obj_set_style_text_color(theme_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(theme_title, &lv_font_montserrat_18, 0);
+    lv_obj_align(theme_title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    theme_dropdown = lv_dropdown_create(theme_section);
+    lv_obj_set_size(theme_dropdown, 300, 34);
+    lv_obj_align(theme_dropdown, LV_ALIGN_TOP_LEFT, 140, -4);
+    lv_dropdown_set_options(theme_dropdown, theme_dropdown_options());
+    lv_dropdown_set_selected(theme_dropdown, theme_get_index());
+    lv_obj_set_style_bg_color(theme_dropdown, COLOR_CARD_BG, 0);
+    lv_obj_set_style_bg_opa(theme_dropdown, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(theme_dropdown, 1, 0);
+    lv_obj_set_style_border_color(theme_dropdown, COLOR_ACCENT, 0);
+    lv_obj_set_style_border_opa(theme_dropdown, LV_OPA_50, 0);
+    lv_obj_set_style_radius(theme_dropdown, 8, 0);
+    lv_obj_set_style_text_color(theme_dropdown, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(theme_dropdown, &lv_font_montserrat_16, 0);
+    lv_obj_add_event_cb(theme_dropdown, settings_theme_changed, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Swatch strip: the live palette, so the effect of a preset is visible
+     * before scrolling the rest of the UI. */
+    static const theme_slot_t swatch_slots[] = {
+        THEME_ACCENT, THEME_BACKGROUND, THEME_CARD_BG,
+        THEME_TEXT_PRIMARY, THEME_TEXT_SECONDARY, THEME_BORDER,
+    };
+    for (size_t i = 0; i < sizeof(swatch_slots) / sizeof(swatch_slots[0]); i++) {
+        lv_obj_t *sw = lv_obj_create(theme_section);
+        lv_obj_set_size(sw, 34, 24);
+        lv_obj_align(sw, LV_ALIGN_TOP_LEFT, 140 + (int) i * 40, 44);
+        lv_obj_set_style_bg_color(sw, theme_color(swatch_slots[i]), 0);
+        lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(sw, 1, 0);
+        lv_obj_set_style_border_color(sw, COLOR_BORDER, 0);
+        lv_obj_set_style_radius(sw, 5, 0);
+        lv_obj_clear_flag(sw, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(sw, LV_OBJ_FLAG_CLICKABLE);
+    }
+
     lv_obj_t *timezone_section = lv_obj_create(main_cont);
     lv_obj_set_size(timezone_section, 680, 50);
-    lv_obj_align(timezone_section, LV_ALIGN_TOP_MID, 0, 430);
+    lv_obj_align(timezone_section, LV_ALIGN_TOP_MID, 0, 560);
     lv_obj_set_style_bg_opa(timezone_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(timezone_section, 0, 0);
     lv_obj_set_style_pad_all(timezone_section, 10, 0);
@@ -648,7 +758,7 @@ void settings_screen_create(void)
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
     lv_obj_set_size(ota_section, 680, 160);
-    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 490);
+    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 620);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -742,6 +852,7 @@ void settings_screen_destroy(void)
         brightness_slider = NULL;
         brightness_value_label = NULL;
         timezone_dropdown = NULL;
+        theme_dropdown = NULL;
         ota_update_btn = NULL;
         ota_status_label = NULL;
         ota_progress_bar = NULL;

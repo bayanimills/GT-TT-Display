@@ -2,6 +2,7 @@
 #define HOME_H
 
 #include "lvgl.h"
+#include "theme.h"
 
 // Hardware information structure
 typedef struct {
@@ -21,16 +22,18 @@ typedef struct {
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 480
 
-// Colors (Bitaxe site theme)
-#define COLOR_BACKGROUND    lv_color_hex(0x050506)
-#define COLOR_CARD_BG       lv_color_hex(0x0F1218)
-#define COLOR_ACCENT        lv_color_hex(0xD4021B)
-#define COLOR_RED           lv_color_hex(0xD4021B)
-#define COLOR_TEXT_PRIMARY  lv_color_hex(0xFFFFFF)
-#define COLOR_TEXT_SECONDARY lv_color_hex(0xA3A3A3)
-#define COLOR_TEXT_ON_ACCENT lv_color_hex(0x000000)
-#define COLOR_BORDER        lv_color_hex(0x1A1D24)
-#define COLOR_NAV_BG        lv_color_hex(0x0C0F14)
+// Colors -- resolved at runtime from the active theme (see theme.h/theme.c).
+// Every screen paints through these macros, so swapping a preset restyles the
+// whole UI without touching a single screen file.
+#define COLOR_BACKGROUND     theme_color(THEME_BACKGROUND)
+#define COLOR_CARD_BG        theme_color(THEME_CARD_BG)
+#define COLOR_ACCENT         theme_color(THEME_ACCENT)
+#define COLOR_RED            theme_color(THEME_RED)
+#define COLOR_TEXT_PRIMARY   theme_color(THEME_TEXT_PRIMARY)
+#define COLOR_TEXT_SECONDARY theme_color(THEME_TEXT_SECONDARY)
+#define COLOR_TEXT_ON_ACCENT theme_color(THEME_TEXT_ON_ACCENT)
+#define COLOR_BORDER         theme_color(THEME_BORDER)
+#define COLOR_NAV_BG         theme_color(THEME_NAV_BG)
 
 // Function declarations
 void home_screen_create(void);
