@@ -31,6 +31,7 @@ static lv_obj_t *brightness_slider = NULL;
 static lv_obj_t *brightness_value_label = NULL;
 static lv_obj_t *timezone_dropdown = NULL;
 static lv_obj_t *theme_dropdown = NULL;
+static lv_obj_t *skin_dropdown = NULL;
 static lv_obj_t *sys_overlay = NULL;
 static int diag_counter = 0;
 
@@ -503,6 +504,19 @@ void settings_theme_changed(lv_event_t *e)
     lv_async_call(settings_apply_theme_async, (void *) (intptr_t) index);
 }
 
+static void settings_apply_skin_async(void *param)
+{
+    theme_set_skin((theme_skin_t) (intptr_t) param);
+}
+
+/* Same deferral as the palette: the skin change rebuilds this screen. */
+static void settings_skin_changed(lv_event_t *e)
+{
+    uint16_t index = lv_dropdown_get_selected(lv_event_get_target(e));
+    ESP_LOGI(TAG, "Skin selected: %u", (unsigned) index);
+    lv_async_call(settings_apply_skin_async, (void *) (intptr_t) index);
+}
+
 void settings_rebuild_for_theme(void)
 {
     if (settings_screen == NULL) {
@@ -701,6 +715,29 @@ void settings_screen_create(void)
     lv_obj_set_style_text_color(theme_dropdown, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(theme_dropdown, &lv_font_montserrat_16, 0);
     lv_obj_add_event_cb(theme_dropdown, settings_theme_changed, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Skin sits beside the palette: the two are independent axes of a theme,
+     * so any palette can be paired with either skin. */
+    lv_obj_t *skin_title = lv_label_create(theme_section);
+    lv_label_set_text(skin_title, "Skin:");
+    lv_obj_set_style_text_color(skin_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(skin_title, &lv_font_montserrat_18, 0);
+    lv_obj_align(skin_title, LV_ALIGN_TOP_LEFT, 458, 0);
+
+    skin_dropdown = lv_dropdown_create(theme_section);
+    lv_obj_set_size(skin_dropdown, 150, 34);
+    lv_obj_align(skin_dropdown, LV_ALIGN_TOP_LEFT, 510, -4);
+    lv_dropdown_set_options(skin_dropdown, "Classic\nGlass");
+    lv_dropdown_set_selected(skin_dropdown, (uint16_t) theme_get_skin());
+    lv_obj_set_style_bg_color(skin_dropdown, COLOR_CARD_BG, 0);
+    lv_obj_set_style_bg_opa(skin_dropdown, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(skin_dropdown, 1, 0);
+    lv_obj_set_style_border_color(skin_dropdown, COLOR_ACCENT, 0);
+    lv_obj_set_style_border_opa(skin_dropdown, LV_OPA_50, 0);
+    lv_obj_set_style_radius(skin_dropdown, 8, 0);
+    lv_obj_set_style_text_color(skin_dropdown, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(skin_dropdown, &lv_font_montserrat_16, 0);
+    lv_obj_add_event_cb(skin_dropdown, settings_skin_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* Swatch strip: the live palette, so the effect of a preset is visible
      * before scrolling the rest of the UI. */

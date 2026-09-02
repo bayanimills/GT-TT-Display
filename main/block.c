@@ -89,6 +89,11 @@ lv_obj_t *block_get_screen(void)
     return block_screen;
 }
 
+const char *block_get_height_text(void)
+{
+    return current_block_height_text;
+}
+
 void block_update_height(const char *height)
 {
     if (!height)

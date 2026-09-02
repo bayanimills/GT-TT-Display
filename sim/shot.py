@@ -97,7 +97,10 @@ class Sim:
         The sim only emits on repaint, so reads must never block -- a static
         screen legitimately produces nothing."""
         deadline = time.time() + settle
-        last = None
+        # Remember the newest frame across calls: a command that changes
+        # nothing on screen produces no new frame, and the caller still wants
+        # the last good one rather than None.
+        last = getattr(self, "last", None)
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -115,6 +118,7 @@ class Sim:
                         continue
                     last = self.buf[12:FRAME]
                     self.buf = self.buf[FRAME:]
+        self.last = last
         return last
 
     def close(self):
@@ -131,6 +135,14 @@ def main():
     ap.add_argument("--screen", default="home", choices=SCREENS)
     ap.add_argument("--preset", type=int, default=None)
     ap.add_argument("--binary", default="./gtsim")
+    ap.add_argument("--cmd", action="append", default=[],
+                    help="raw sim command sent after the preset (repeatable), e.g. 'K 1' or 'G layout 0'")
+    ap.add_argument("--name", default=None,
+                    help="output file name (without .png); default <screen>-<NN>-<preset>")
+    ap.add_argument("--touch", action="append", default=[],
+                    help="tap at 'x,y' after the commands (repeatable); each tap is a press then release")
+    ap.add_argument("--drag", action="append", default=[],
+                    help="drag 'x1,y1,x2,y2' after the taps (repeatable); a press, a swept move, a release")
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -141,17 +153,43 @@ def main():
         sim.latest_frame(settle=5.5)          # let the boot screen finish
         for line in WARMUP:
             sim.send("B " + line)
+        # Skin and glass commands must land before the screen is built, since
+        # the home screen decides which surface to show at construction.
+        pre = [c for c in args.cmd if c.startswith("K ")]
+        post = [c for c in args.cmd if not c.startswith("K ")]
+        for c in pre:
+            sim.send(c)
         sim.send("N " + args.screen)
         sim.latest_frame(settle=1.5)
 
         for i in presets:
             sim.send("P %d" % i)
-            frame = sim.latest_frame(settle=1.5)
+            sim.latest_frame(settle=1.0)
+            for c in post:
+                sim.send(c)
+                sim.latest_frame(settle=0.6)
+            for t in args.touch:
+                x, y = t.split(",")
+                sim.send("T %s %s 1" % (x, y))
+                sim.latest_frame(settle=0.15)
+                sim.send("T %s %s 0" % (x, y))
+                sim.latest_frame(settle=0.6)
+            for d in args.drag:
+                x1, y1, x2, y2 = [int(v) for v in d.split(",")]
+                steps = 12
+                sim.send("T %d %d 1" % (x1, y1))
+                sim.latest_frame(settle=0.1)
+                for s in range(1, steps + 1):
+                    sim.send("T %d %d 1" % (x1 + (x2 - x1) * s // steps, y1 + (y2 - y1) * s // steps))
+                    sim.latest_frame(settle=0.04)
+                sim.send("T %d %d 0" % (x2, y2))
+                sim.latest_frame(settle=0.8)
+            frame = sim.latest_frame(settle=1.0)
             if frame is None:
                 print("no frame for preset %d" % i, file=sys.stderr)
                 continue
-            name = PRESETS[i].split()[0].lower()
-            path = os.path.join(args.outdir, "%s-%02d-%s.png" % (args.screen, i, name))
+            name = args.name or "%s-%02d-%s" % (args.screen, i, PRESETS[i].split()[0].lower())
+            path = os.path.join(args.outdir, name + ".png")
             write_png(path, frame)
             print(path)
     finally:

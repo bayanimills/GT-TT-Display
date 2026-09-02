@@ -6,6 +6,7 @@
 #include "clock.h"
 #include "price.h"
 #include "mempool.h"
+#include "glass.h"
 #include "stdio.h"
 #include "string.h"
 #include "custom_fonts.h"
@@ -411,6 +412,14 @@ static lv_obj_t *create_bottom_nav_btn_img(lv_obj_t *parent, const lv_img_dsc_t 
 
 void home_screen_create(void)
 {
+    /* Under the Glass skin the home surface is glass.c's; every caller still
+     * comes through here so navigation does not need to know about skins. */
+    if (theme_get_skin() == THEME_SKIN_GLASS)
+    {
+        glass_home_create();
+        return;
+    }
+
     if (home_screen != NULL)
     {
         return;
@@ -623,6 +632,7 @@ void home_screen_create(void)
 
 void home_screen_destroy(void)
 {
+    glass_home_destroy();
     if (home_screen)
     {
         lv_obj_del(home_screen);
@@ -660,7 +670,26 @@ void home_update_hashrate(const char *hashrate)
 
 lv_obj_t *home_get_screen(void)
 {
+    if (glass_home_is_active())
+    {
+        return glass_home_get_screen();
+    }
     return home_screen;
+}
+
+const home_stats_t *home_stats(void)
+{
+    static home_stats_t stats;
+    stats.hashrate    = current_hashrate_text;
+    stats.power       = current_power_text;
+    stats.temperature = current_temperature_text;
+    stats.fan         = current_fan_text;
+    stats.shares      = current_shares_text;
+    stats.best_diff   = current_bd_text;
+    stats.efficiency  = current_efficiency_text;
+    stats.hardware    = &current_hardware_info;
+    stats.pool        = &current_pool_info;
+    return &stats;
 }
 
 void home_hardware_clicked(lv_event_t *e)

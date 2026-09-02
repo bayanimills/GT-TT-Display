@@ -7,6 +7,12 @@ void price_screen_create(void);
 void price_screen_destroy(void);
 lv_obj_t *price_get_screen(void);
 
+/* Cached values for widgets that show the price without opening this screen.
+ * price_ensure_task() starts the fetch loop if the screen never did. */
+const char *price_get_text(void);
+const char *price_get_status(void);
+void        price_ensure_task(void);
+
 void price_home_clicked(lv_event_t *e);
 void price_block_clicked(lv_event_t *e);
 void price_clock_clicked(lv_event_t *e);

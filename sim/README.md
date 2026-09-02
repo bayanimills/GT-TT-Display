@@ -88,10 +88,31 @@ B <sentence>        feed a BAP sentence, e.g. $BAP,RES,hashrate,2450.0*3D
 P <index>           select theme preset
 S <slot> <rrggbb>   override one palette slot
 C                   commit theme (persist + rebuild screen)
+K <skin>            select skin: 0 classic, 1 glass (home rebuilds)
+G <what> <value>    glass skin: layout 0|1, widgets <hexmask>, wall <index>,
+                    drawer 0|1, sheet 0..4 (widgets, layout, wallpaper, pool),
+                    scroll <px>
 N <screen>          home night block clock price mempool wifi settings
 R                   force repaint
 Q                   quit
 ```
+
+### Glass skin screenshots
+
+`shot.py` takes raw commands, taps and drags, so the Glass surface and its
+pickers can be rendered headlessly:
+
+```bash
+python3 shot.py out --preset 0 --cmd "K 1" --name glass-twin
+python3 shot.py out --preset 0 --cmd "K 1" --cmd "G layout 0" --name glass-single
+python3 shot.py out --preset 0 --cmd "K 1" --cmd "G drawer 1" --name glass-drawer
+python3 shot.py out --preset 0 --cmd "K 1" --cmd "G sheet 3" --name glass-wallpapers
+python3 shot.py out --preset 0 --cmd "K 1" --touch 400,300 --touch 47,395   # tap to open the drawer, tap Widgets
+python3 shot.py out --preset 0 --cmd "K 1" --drag 400,400,400,120           # scroll the widget grid
+```
+
+Glass preferences persist to `sim_nvs.txt` like everything else, so delete it
+between runs if you want the defaults back.
 
 Frames come back on stdout as `"GTFB" | u32 frame | u16 w | u16 h | RGB565 LE`.
 

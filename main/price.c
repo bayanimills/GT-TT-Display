@@ -177,6 +177,17 @@ lv_obj_t *price_get_screen(void)
     return price_screen;
 }
 
+const char *price_get_text(void)   { return current_price_text; }
+const char *price_get_status(void) { return current_price_status; }
+
+void price_ensure_task(void)
+{
+    if (price_task_handle == NULL)
+    {
+        xTaskCreate(price_task, "price_fetch_task", 4096, NULL, 5, &price_task_handle);
+    }
+}
+
 static void apply_cached_price(void)
 {
     if (price_value_label)

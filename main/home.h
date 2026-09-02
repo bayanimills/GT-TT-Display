@@ -35,6 +35,23 @@ typedef struct {
 #define COLOR_BORDER         theme_color(THEME_BORDER)
 #define COLOR_NAV_BG         theme_color(THEME_NAV_BG)
 
+// Everything the BAP parser has told the home screen so far, as display-ready
+// strings. The Glass surface reads these instead of owning a second cache, so
+// bap_parser.c keeps calling the home_update_* entry points unchanged.
+typedef struct {
+    const char *hashrate;      // "2201.6" (GH/s), "" until received
+    const char *power;         // "35.9W"
+    const char *temperature;   // "58.50°C"
+    const char *fan;           // "2728 RPM"
+    const char *shares;        // "66/0"
+    const char *best_diff;     // "3.65M"
+    const char *efficiency;    // "16.3 J/TH" or "-- J/TH"
+    const hardware_info_t *hardware;
+    const pool_info_t     *pool;
+} home_stats_t;
+
+const home_stats_t *home_stats(void);
+
 // Function declarations
 void home_screen_create(void);
 void home_screen_destroy(void);

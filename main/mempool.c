@@ -203,6 +203,33 @@ lv_obj_t *mempool_get_screen(void)
     return mempool_screen;
 }
 
+bool mempool_get_latest(char *fee_out, size_t fee_len, char *detail_out, size_t detail_len)
+{
+    if (mempool_block_count <= 0)
+    {
+        return false;
+    }
+    const mempool_block_t *b = &mempool_blocks[0];
+    if (fee_out && fee_len)
+    {
+        snprintf(fee_out, fee_len, "~%.0f sat/vB", b->median_fee);
+    }
+    if (detail_out && detail_len)
+    {
+        snprintf(detail_out, detail_len, "%lld  %d min ago  %s",
+                 b->height, b->minutes_ago, b->pool_name);
+    }
+    return true;
+}
+
+void mempool_ensure_task(void)
+{
+    if (mempool_task_handle == NULL)
+    {
+        xTaskCreate(mempool_task, "mempool_task", 6144, NULL, 5, &mempool_task_handle);
+    }
+}
+
 static void mempool_task(void *arg)
 {
     (void)arg;

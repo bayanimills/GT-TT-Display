@@ -13,6 +13,8 @@
  *           S <slot> <rrggbb> override one theme slot
  *           C                 commit theme (persist + repaint)
  *           N <screen>        navigate: home night block clock price mempool wifi settings
+ *           K <skin>          select skin (0 classic, 1 glass); home rebuilds on next N home
+ *           G <what> <val>    glass: layout 0|1, widgets <hex>, wall <i>, drawer 0|1, sheet 0..4
  *           R                 force full repaint
  *           Q                 quit
  */
@@ -34,6 +36,7 @@
 #include "esp_lcd_touch.h"
 
 #include "theme.h"
+#include "glass.h"
 #include "home.h"
 #include "night.h"
 #include "block.h"
@@ -246,6 +249,25 @@ static void handle_command(char *line)
         for (int i = 0; i < SCREEN_COUNT; i++) {
             if (strcmp(arg, k_screens[i].name) == 0) { sim_goto(i); break; }
         }
+        break;
+    }
+    case 'K':
+        theme_set_skin((theme_skin_t) atoi(arg));
+        break;
+    case 'G': {
+        /* Glass skin controls: layout <0|1>, widgets <hexmask>, wall <index>,
+         * drawer <0|1>, sheet <0..4>. All go through the same setters the
+         * on-device pickers use, so a screenshot exercises the real path. */
+        char what[16] = { 0 };
+        char val[32] = { 0 };
+        if (sscanf(arg, "%15s %31s", what, val) < 1) break;
+        if (strcmp(what, "layout") == 0)       glass_set_layout((glass_layout_t) atoi(val));
+        else if (strcmp(what, "widgets") == 0) glass_set_widget_mask((uint32_t) strtoul(val, NULL, 16));
+        else if (strcmp(what, "wall") == 0)    glass_set_wallpaper(atoi(val));
+        else if (strcmp(what, "drawer") == 0)  { if (atoi(val)) glass_drawer_open(); else glass_drawer_close(); }
+        else if (strcmp(what, "sheet") == 0)   { int s = atoi(val); if (s) glass_sheet_open((glass_sheet_t) s); else glass_sheet_close(); }
+        else if (strcmp(what, "scroll") == 0)  glass_scroll_to(atoi(val));
+        s_dirty = true;
         break;
     }
     case 'R':

@@ -26,6 +26,18 @@ typedef struct {
     uint32_t    slot[THEME_SLOT_COUNT];   /* 0xRRGGBB */
 } theme_preset_t;
 
+/* A skin is the second, orthogonal axis of a theme: the palette says which
+ * colours, the skin says which layout and surface treatment. Classic is the
+ * original card-and-nav-bar UI painted through the nine slots; Glass is the
+ * full-screen wallpaper-and-widgets surface in glass.c, which borrows only the
+ * palette's accent. Keeping the two separate means every existing preset
+ * still works untouched in either skin. */
+typedef enum {
+    THEME_SKIN_CLASSIC = 0,
+    THEME_SKIN_GLASS,
+    THEME_SKIN_COUNT
+} theme_skin_t;
+
 /* Load persisted theme (NVS on device, defaults elsewhere). Safe to call once at boot. */
 void theme_init(void);
 
@@ -48,6 +60,12 @@ void theme_set_index(int index);
  * Marks the theme custom; call theme_commit() to persist and repaint. */
 void theme_set_slot(theme_slot_t slot, uint32_t rgb);
 void theme_commit(void);
+
+/* Skin selection. Persists; takes effect the next time the home screen is built
+ * (the settings screen that hosts the picker is rebuilt through the reload). */
+theme_skin_t theme_get_skin(void);
+const char  *theme_skin_name(theme_skin_t skin);
+void         theme_set_skin(theme_skin_t skin);
 
 /* The screen layer registers how to rebuild itself after a theme change. */
 void theme_register_reload(void (*reload_cb)(void));

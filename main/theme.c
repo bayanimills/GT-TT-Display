@@ -9,6 +9,7 @@ static const char *TAG = "theme";
 #define THEME_NVS_NS   "gttouch"
 #define THEME_NVS_IDX  "theme_idx"
 #define THEME_NVS_CUS  "theme_custom"
+#define THEME_NVS_SKIN "theme_skin"
 #else
 #define ESP_LOGI(...) do {} while (0)
 #endif
@@ -32,7 +33,10 @@ static uint32_t s_active[THEME_SLOT_COUNT];
 static int      s_index      = 0;
 static bool     s_custom     = false;
 static bool     s_ready      = false;
+static theme_skin_t s_skin   = THEME_SKIN_CLASSIC;
 static void   (*s_reload_cb)(void) = NULL;
+
+static const char *k_skin_names[THEME_SKIN_COUNT] = { "Classic", "Glass" };
 
 static void apply_preset(int index)
 {
@@ -48,6 +52,7 @@ static void theme_persist(void)
     nvs_handle_t h;
     if (nvs_open(THEME_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_set_i32(h, THEME_NVS_IDX, s_index);
+    nvs_set_i32(h, THEME_NVS_SKIN, (int32_t) s_skin);
     if (s_custom) {
         nvs_set_blob(h, THEME_NVS_CUS, s_active, sizeof(s_active));
     } else {
@@ -69,6 +74,11 @@ void theme_init(void)
     if (nvs_open(THEME_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
         int32_t idx = 0;
         if (nvs_get_i32(h, THEME_NVS_IDX, &idx) == ESP_OK) apply_preset((int) idx);
+
+        int32_t skin = 0;
+        if (nvs_get_i32(h, THEME_NVS_SKIN, &skin) == ESP_OK && skin >= 0 && skin < THEME_SKIN_COUNT) {
+            s_skin = (theme_skin_t) skin;
+        }
 
         size_t len = sizeof(s_active);
         uint32_t blob[THEME_SLOT_COUNT];
@@ -107,6 +117,26 @@ int         theme_get_index(void)    { if (!s_ready) theme_init(); return s_inde
 const char *theme_get_name(void)     { if (!s_ready) theme_init(); return s_custom ? "Custom" : k_presets[s_index].name; }
 
 void theme_register_reload(void (*reload_cb)(void)) { s_reload_cb = reload_cb; }
+
+theme_skin_t theme_get_skin(void)
+{
+    if (!s_ready) theme_init();
+    return s_skin;
+}
+
+const char *theme_skin_name(theme_skin_t skin)
+{
+    if (skin < 0 || skin >= THEME_SKIN_COUNT) return "?";
+    return k_skin_names[skin];
+}
+
+void theme_set_skin(theme_skin_t skin)
+{
+    if (!s_ready) theme_init();
+    if (skin < 0 || skin >= THEME_SKIN_COUNT) return;
+    s_skin = skin;
+    theme_commit();
+}
 
 void theme_commit(void)
 {
