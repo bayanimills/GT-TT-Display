@@ -10,6 +10,7 @@ static const char *TAG = "theme";
 #define THEME_NVS_IDX  "theme_idx"
 #define THEME_NVS_CUS  "theme_custom"
 #define THEME_NVS_SKIN "theme_skin"
+#define THEME_NVS_ICON "theme_icon"
 #else
 #define ESP_LOGI(...) do {} while (0)
 #endif
@@ -34,6 +35,7 @@ static int      s_index      = 0;
 static bool     s_custom     = false;
 static bool     s_ready      = false;
 static theme_skin_t s_skin   = THEME_SKIN_CLASSIC;
+static uint32_t s_icon_override = 0;
 static void   (*s_reload_cb)(void) = NULL;
 
 static const char *k_skin_names[THEME_SKIN_COUNT] = { "Classic", "Glass" };
@@ -44,6 +46,8 @@ static void apply_preset(int index)
     s_index  = index;
     s_custom = false;
     memcpy(s_active, k_presets[index].slot, sizeof(s_active));
+    /* Presets predate the icon slot and leave it zero: icons follow the accent. */
+    s_active[THEME_ICON] = k_presets[index].slot[THEME_ACCENT];
 }
 
 static void theme_persist(void)
@@ -53,6 +57,7 @@ static void theme_persist(void)
     if (nvs_open(THEME_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_set_i32(h, THEME_NVS_IDX, s_index);
     nvs_set_i32(h, THEME_NVS_SKIN, (int32_t) s_skin);
+    nvs_set_i32(h, THEME_NVS_ICON, (int32_t) s_icon_override);
     if (s_custom) {
         nvs_set_blob(h, THEME_NVS_CUS, s_active, sizeof(s_active));
     } else {
@@ -75,6 +80,9 @@ void theme_init(void)
         int32_t idx = 0;
         if (nvs_get_i32(h, THEME_NVS_IDX, &idx) == ESP_OK) apply_preset((int) idx);
 
+        int32_t icon = 0;
+        if (nvs_get_i32(h, THEME_NVS_ICON, &icon) == ESP_OK) s_icon_override = (uint32_t) icon & 0xFFFFFF;
+
         int32_t skin = 0;
         if (nvs_get_i32(h, THEME_NVS_SKIN, &skin) == ESP_OK && skin >= 0 && skin < THEME_SKIN_COUNT) {
             s_skin = (theme_skin_t) skin;
@@ -92,18 +100,42 @@ void theme_init(void)
 #endif
 }
 
+/* Under Glass the surface is a wallpaper, not a palette background, so the
+ * slots that describe surfaces and text resolve to values that read over any
+ * wallpaper. Accent, red and on-accent still come from the chosen palette:
+ * that is what a palette means in Glass. Classic is untouched because the
+ * override is gated on the skin. */
+static const uint32_t k_glass_slot[THEME_SLOT_COUNT] = {
+    [THEME_BACKGROUND]     = 0x070B1F,
+    [THEME_CARD_BG]        = 0x161B2A,
+    [THEME_TEXT_PRIMARY]   = 0xFFFFFF,
+    [THEME_TEXT_SECONDARY] = 0xC8D0DC,
+    [THEME_BORDER]         = 0xFFFFFF,
+    [THEME_NAV_BG]         = 0x0C1020,
+};
+static const uint32_t k_glass_mask =
+    (1u << THEME_BACKGROUND) | (1u << THEME_CARD_BG) | (1u << THEME_TEXT_PRIMARY) |
+    (1u << THEME_TEXT_SECONDARY) | (1u << THEME_BORDER) | (1u << THEME_NAV_BG);
+
+static uint32_t resolve_slot(theme_slot_t slot)
+{
+    if (slot == THEME_ICON && s_icon_override) return s_icon_override;
+    if (s_skin == THEME_SKIN_GLASS && (k_glass_mask & (1u << slot))) return k_glass_slot[slot];
+    return s_active[slot];
+}
+
 lv_color_t theme_color(theme_slot_t slot)
 {
     if (!s_ready) theme_init();
     if (slot < 0 || slot >= THEME_SLOT_COUNT) slot = THEME_TEXT_PRIMARY;
-    return lv_color_hex(s_active[slot]);
+    return lv_color_hex(resolve_slot(slot));
 }
 
 uint32_t theme_color_hex(theme_slot_t slot)
 {
     if (!s_ready) theme_init();
     if (slot < 0 || slot >= THEME_SLOT_COUNT) slot = THEME_TEXT_PRIMARY;
-    return s_active[slot];
+    return resolve_slot(slot);
 }
 
 const theme_preset_t *theme_presets(size_t *count)
@@ -117,6 +149,19 @@ int         theme_get_index(void)    { if (!s_ready) theme_init(); return s_inde
 const char *theme_get_name(void)     { if (!s_ready) theme_init(); return s_custom ? "Custom" : k_presets[s_index].name; }
 
 void theme_register_reload(void (*reload_cb)(void)) { s_reload_cb = reload_cb; }
+
+void theme_set_icon_override(uint32_t rgb)
+{
+    if (!s_ready) theme_init();
+    s_icon_override = rgb & 0xFFFFFF;
+    theme_persist();
+}
+
+uint32_t theme_get_icon_override(void)
+{
+    if (!s_ready) theme_init();
+    return s_icon_override;
+}
 
 theme_skin_t theme_get_skin(void)
 {

@@ -18,6 +18,7 @@ typedef enum {
     THEME_TEXT_ON_ACCENT,
     THEME_BORDER,
     THEME_NAV_BG,
+    THEME_ICON,          /* icon tint; presets leave it equal to the accent */
     THEME_SLOT_COUNT
 } theme_slot_t;
 
@@ -60,6 +61,12 @@ void theme_set_index(int index);
  * Marks the theme custom; call theme_commit() to persist and repaint. */
 void theme_set_slot(theme_slot_t slot, uint32_t rgb);
 void theme_commit(void);
+
+/* Icon tint override (0 = follow the preset, otherwise 0xRRGGBB). Persists.
+ * Lets the Glass skin pick an icon colour that suits a wallpaper without
+ * abandoning the palette. */
+void     theme_set_icon_override(uint32_t rgb);
+uint32_t theme_get_icon_override(void);
 
 /* Skin selection. Persists; takes effect the next time the home screen is built
  * (the settings screen that hosts the picker is rebuilt through the reload). */

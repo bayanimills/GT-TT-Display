@@ -9,11 +9,12 @@
 #include "block.h"
 #include "price.h"
 #include "mempool.h"
+#include "clock.h"
 #include "wifi.h"
+#include "settings.h"
+#include "night.h"
 #include "custom_fonts.h"
-#include "assets/temperature_icon.h"
-#include "assets/fan.h"
-#include "assets/star.h"
+#include "assets/glass_icons.h"
 #include "lvgl__lvgl/src/extra/libs/qrcode/lv_qrcode.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -40,18 +41,40 @@ static const char *TAG = "glass";
 #define DRAWER_H      124
 #define DRAWER_MARGIN 14
 
-/* Translucent white is the whole material. Opacities are tuned against the
- * frost crop underneath: enough to read as a pane, not so much that it goes
- * flat grey and loses the wallpaper. */
-#define TINT_OPA       LV_OPA_20
+/* Text tiers. Captions and sub-values each have a floor; nothing on a pane is
+ * drawn fainter than the sub-value tier. Contrast itself is guaranteed by the
+ * material underneath (see material_for), not by these numbers. */
+#define CAPTION_OPA    LV_OPA_80
+#define SUB_OPA        LV_OPA_90
 #define BORDER_OPA     LV_OPA_30
 #define SPECULAR_OPA   LV_OPA_60
-#define TEXT_DIM_OPA   LV_OPA_60
+
+/* Material text colours. Dark material carries white text; light material
+ * carries near-black. The secondary tier is a step toward the substrate. */
+#define DARK_PRIMARY     0xFFFFFF
+#define DARK_SECONDARY   0xD4DAE4
+#define LIGHT_PRIMARY    0x0B0E14
+#define LIGHT_SECONDARY  0x3A4150
+
+/* Substrate targets. A pane's tint is chosen so the wallpaper showing through
+ * it lands at or past these luminances, which puts white (or near-black) text
+ * above 4.5:1 at the caption tier on every wallpaper. */
+#define DARK_TARGET_LUM   0.13f
+#define LIGHT_TARGET_LUM  0.82f
+#define LIGHT_THRESHOLD   0.62f
+#define TINT_MIN          0.30f
+#define TINT_MAX          0.85f
+#define ICON_LUM_GAP      0.30f
 
 #define DEFAULT_MASK ((1u << GLASS_WIDGET_HASHRATE) | (1u << GLASS_WIDGET_TEMPERATURE) | \
                       (1u << GLASS_WIDGET_POWER)    | (1u << GLASS_WIDGET_SHARES) | \
                       (1u << GLASS_WIDGET_BEST_DIFF)| (1u << GLASS_WIDGET_FAN) | \
                       (1u << GLASS_WIDGET_BLOCK))
+
+/* user_data markers on labels and images so the material walk knows which
+ * ones are icons or accent text rather than body text. */
+#define MARK_ICON   ((void *) 1)
+#define MARK_ACCENT ((void *) 2)
 
 typedef struct {
     glass_widget_t id;
@@ -63,31 +86,57 @@ typedef struct {
     lv_obj_t *aux;        /* hero only: right-hand figure */
 } card_t;
 
+typedef struct {
+    bool     light;       /* light material (dark text) or dark (white text) */
+    float    substrate;   /* luminance the text sits on, 0..1 */
+    lv_opa_t tint_opa;
+} material_t;
+
 /* Every glass pane keeps a frost crop of the wallpaper as its backdrop, and the
  * crop has to track the pane's on-screen position (scrolling, the drawer
- * sliding in), so panes register here and glass_frost_sync() re-aims them. */
+ * sliding in), so panes register here and frost_sync() re-aims them. The same
+ * pass samples the wallpaper under the pane and sets its material. Entries
+ * remember which screen they belong to so a screen can be forgotten wholesale
+ * when it is destroyed. */
 typedef struct {
     lv_obj_t *panel;
     lv_obj_t *frost;
+    lv_obj_t *tint;
+    lv_obj_t *host;
+    bool      dim;
+    int       last_x, last_y;
+    uint8_t   mat_bucket;  /* 0 = never applied */
+    material_t mat;
 } frost_ref_t;
 
+/* The screen the drawer and sheets currently attach to. Only one glass screen
+ * is normally alive, but during navigation the next one is created before the
+ * previous is destroyed, so the host is tracked explicitly. */
+static lv_obj_t      *s_host      = NULL;
+static glass_screen_t s_host_kind = GLASS_SCREEN_HOME;
+static bool           s_host_dim  = false;
+static lv_obj_t      *s_host_wall = NULL;
+
+/* Home surface. */
 static lv_obj_t *s_screen       = NULL;
-static lv_obj_t *s_wall_img     = NULL;
 static lv_obj_t *s_grid         = NULL;
-static lv_obj_t *s_drawer_scrim = NULL;
-static lv_obj_t *s_drawer_sheet = NULL;
-static lv_obj_t *s_sheet_scrim  = NULL;
-static lv_obj_t *s_sheet_panel  = NULL;
 static lv_timer_t *s_refresh    = NULL;
 
-static card_t      s_cards[GLASS_WIDGET_COUNT];
-static int         s_card_count = 0;
-static frost_ref_t s_frost[GLASS_WIDGET_COUNT + 8];
-static int         s_frost_count = 0;
-
+/* Drawer and sheets. */
+static lv_obj_t *s_drawer_scrim = NULL;
+static lv_obj_t *s_drawer_sheet = NULL;
+static lv_obj_t *s_drawer_host  = NULL;
+static lv_obj_t *s_sheet_scrim  = NULL;
+static lv_obj_t *s_sheet_panel  = NULL;
+static lv_obj_t *s_sheet_host   = NULL;
 static glass_sheet_t s_sheet       = GLASS_SHEET_NONE;
 static bool          s_drawer_open = false;
 static bool          s_drawer_anim = false;
+
+static card_t      s_cards[GLASS_WIDGET_COUNT];
+static int         s_card_count = 0;
+static frost_ref_t s_frost[40];
+static int         s_frost_count = 0;
 
 static uint32_t       s_mask   = DEFAULT_MASK;
 static glass_layout_t s_layout = GLASS_LAYOUT_TWIN;
@@ -105,10 +154,21 @@ static const char *k_widget_names[GLASS_WIDGET_COUNT] = {
     "Pool", "Block height", "BTC price", "Mempool", "Clock",
 };
 
+/* Icon tint choices offered in the drawer. 0 means follow the palette. */
+typedef struct { const char *name; uint32_t rgb; } icon_choice_t;
+static const icon_choice_t k_icon_choices[] = {
+    { "Accent", 0 },        { "White", 0xFFFFFF },  { "Amber", 0xF5B942 },
+    { "Mint",   0x4DE3B0 }, { "Sky",   0x5AC8FA },  { "Lilac", 0xB48CFF },
+    { "Rose",   0xFF6B9A },
+};
+#define ICON_CHOICE_COUNT ((int) (sizeof(k_icon_choices) / sizeof(k_icon_choices[0])))
+
 static void build_grid(void);
 static void rebuild_grid_async(void *unused);
 static void frost_sync(void);
 static void drawer_toggle_cb(lv_event_t *e);
+static void drawer_reset(void);
+static void sheet_reset(void);
 
 /* ---------------- preferences ---------------- */
 
@@ -145,6 +205,7 @@ const char    *glass_widget_name(glass_widget_t id)
     if (id < 0 || id >= GLASS_WIDGET_COUNT) return "?";
     return k_widget_names[id];
 }
+bool glass_active(void) { return theme_get_skin() == THEME_SKIN_GLASS; }
 
 void glass_set_widget_mask(uint32_t mask)
 {
@@ -163,21 +224,26 @@ void glass_set_layout(glass_layout_t layout)
     if (s_screen) lv_async_call(rebuild_grid_async, NULL);
 }
 
+static void material_reapply_all(void)
+{
+    for (int i = 0; i < s_frost_count; i++) s_frost[i].mat_bucket = 0;
+    frost_sync();
+}
+
 static void wallpaper_swap_async(void *unused)
 {
     (void) unused;
-    if (!s_screen) return;
+    if (!s_host) return;
     if (!wallpaper_prepare(s_wall)) return;
     /* Same descriptor pointers, new pixels: the cache is disabled in lv_conf
-     * so an invalidate is all it takes for every crop to pick them up. */
-    if (s_wall_img) {
-        lv_img_set_src(s_wall_img, wallpaper_image(WALLPAPER_SHARP));
-        lv_obj_invalidate(s_wall_img);
+     * so an invalidate is all it takes for every crop to pick them up. The
+     * material under every pane changed too, so it is re-derived. */
+    if (s_host_wall) {
+        lv_img_set_src(s_host_wall, wallpaper_image(WALLPAPER_SHARP));
+        lv_obj_invalidate(s_host_wall);
     }
-    for (int i = 0; i < s_frost_count; i++) {
-        if (s_frost[i].frost) lv_obj_invalidate(s_frost[i].frost);
-    }
-    lv_obj_invalidate(s_screen);
+    material_reapply_all();
+    lv_obj_invalidate(s_host);
 }
 
 void glass_set_wallpaper(int index)
@@ -186,17 +252,155 @@ void glass_set_wallpaper(int index)
     if (index < 0 || index >= wallpaper_count()) return;
     s_wall = index;
     prefs_save();
-    if (s_screen) lv_async_call(wallpaper_swap_async, NULL);
+    if (s_host) lv_async_call(wallpaper_swap_async, NULL);
+}
+
+/* ---------------- colour maths ---------------- */
+
+static float color_lum(lv_color_t c)
+{
+    lv_color32_t c32;
+    c32.full = lv_color_to32(c);
+    return (0.2126f * c32.ch.red + 0.7152f * c32.ch.green + 0.0722f * c32.ch.blue) / 255.0f;
+}
+
+static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+/* iOS does not put a brand colour on glass neat: over a dark material it is
+ * lifted and desaturated, over a light one deepened. Then it is pushed until
+ * it sits at least ICON_LUM_GAP of luminance away from the substrate, so an
+ * icon can never sink into the pane it sits on. */
+static lv_color_t vibrant(lv_color_t base, const material_t *m)
+{
+    lv_color_hsv_t hsv = lv_color_to_hsv(base);
+    lv_color_t out;
+    if (!m->light) {
+        if (hsv.s > 72) hsv.s = 72;
+        hsv.v = 100;
+        out = lv_color_hsv_to_rgb(hsv.h, hsv.s, hsv.v);
+        for (int i = 0; i < 8 && color_lum(out) < m->substrate + ICON_LUM_GAP && hsv.s > 8; i++) {
+            hsv.s = (uint8_t) (hsv.s > 12 ? hsv.s - 12 : 0);
+            out = lv_color_hsv_to_rgb(hsv.h, hsv.s, hsv.v);
+        }
+    } else {
+        if (hsv.s < 60 && hsv.s > 0) hsv.s = 60;
+        if (hsv.v > 60) hsv.v = 60;
+        out = lv_color_hsv_to_rgb(hsv.h, hsv.s, hsv.v);
+        for (int i = 0; i < 8 && color_lum(out) > m->substrate - ICON_LUM_GAP && hsv.v > 12; i++) {
+            hsv.v = (uint8_t) (hsv.v > 8 ? hsv.v - 8 : 0);
+            out = lv_color_hsv_to_rgb(hsv.h, hsv.s, hsv.v);
+        }
+    }
+    return out;
+}
+
+static lv_color_t material_primary(const material_t *m)   { return lv_color_hex(m->light ? LIGHT_PRIMARY : DARK_PRIMARY); }
+static lv_color_t material_secondary(const material_t *m) { return lv_color_hex(m->light ? LIGHT_SECONDARY : DARK_SECONDARY); }
+static lv_color_t material_icon(const material_t *m)      { return vibrant(theme_color(THEME_ICON), m); }
+static lv_color_t material_accent(const material_t *m)    { return vibrant(theme_color(THEME_ACCENT), m); }
+
+/* Mean luminance of the frost wallpaper under a screen rectangle. */
+static float region_lum(int x1, int y1, int x2, int y2)
+{
+    const lv_img_dsc_t *img = wallpaper_image(WALLPAPER_FROST);
+    if (!img) return 0.10f;
+    const uint16_t *px = (const uint16_t *) img->data;
+    if (x1 < 0) x1 = 0;
+    if (y1 < 0) y1 = 0;
+    if (x2 > SCREEN_WIDTH - 1) x2 = SCREEN_WIDTH - 1;
+    if (y2 > SCREEN_HEIGHT - 1) y2 = SCREEN_HEIGHT - 1;
+    if (x2 <= x1 || y2 <= y1) return 0.10f;
+
+    uint32_t sum = 0, n = 0;
+    for (int y = y1; y <= y2; y += 8) {
+        const uint16_t *row = px + (size_t) y * SCREEN_WIDTH;
+        for (int x = x1; x <= x2; x += 8) {
+            uint16_t v = row[x];
+            uint32_t r = ((v >> 11) & 0x1F) << 3, g = ((v >> 5) & 0x3F) << 2, b = (v & 0x1F) << 3;
+            sum += (r * 54 + g * 183 + b * 18) >> 8;
+            n++;
+        }
+    }
+    return n ? (float) sum / (255.0f * (float) n) : 0.10f;
+}
+
+/* Choose the material for a pane over wallpaper of mean luminance `lum`. */
+static material_t material_for(float lum, bool dim)
+{
+    material_t m;
+    if (dim) {
+        m.light = false;
+        m.tint_opa = (lv_opa_t) (255 * TINT_MAX);
+        m.substrate = lum * (1.0f - TINT_MAX);
+        return m;
+    }
+    m.light = lum > LIGHT_THRESHOLD;
+    float a;
+    if (m.light) a = (LIGHT_TARGET_LUM - lum) / (1.0f - lum + 0.001f);
+    else         a = (lum - DARK_TARGET_LUM) / (lum + 0.001f);
+    a = clampf(a, TINT_MIN, TINT_MAX);
+    m.tint_opa  = (lv_opa_t) (255.0f * a);
+    m.substrate = m.light ? lum + (1.0f - lum) * a : lum * (1.0f - a);
+    return m;
+}
+
+static bool color_eq(lv_color_t a, lv_color_t b) { return a.full == b.full; }
+
+static bool is_material_text(lv_color_t c, bool *secondary)
+{
+    static const uint32_t primaries[]   = { DARK_PRIMARY, LIGHT_PRIMARY };
+    static const uint32_t secondaries[] = { DARK_SECONDARY, LIGHT_SECONDARY, 0xC8D0DC };
+    for (size_t i = 0; i < sizeof(primaries) / sizeof(primaries[0]); i++) {
+        if (color_eq(c, lv_color_hex(primaries[i]))) { *secondary = false; return true; }
+    }
+    for (size_t i = 0; i < sizeof(secondaries) / sizeof(secondaries[0]); i++) {
+        if (color_eq(c, lv_color_hex(secondaries[i]))) { *secondary = true; return true; }
+    }
+    return false;
+}
+
+/* Recolour everything on a pane for its material. Labels and icons created
+ * by this file carry markers; labels from the classic screen code are
+ * recognised by the colour they were painted with (the theme's Glass text
+ * values or the raw accent), so the same pass serves every screen. */
+static void apply_material_rec(lv_obj_t *obj, const material_t *m)
+{
+    lv_color_t raw_accent = theme_color(THEME_ACCENT);
+    lv_color_t raw_icon   = theme_color(THEME_ICON);
+    uint32_t n = lv_obj_get_child_cnt(obj);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *c = lv_obj_get_child(obj, i);
+        void *mark = lv_obj_get_user_data(c);
+        if (lv_obj_check_type(c, &lv_label_class)) {
+            lv_color_t cur = lv_obj_get_style_text_color(c, 0);
+            bool secondary = false;
+            if (mark == MARK_ICON)                              lv_obj_set_style_text_color(c, material_icon(m), 0);
+            else if (mark == MARK_ACCENT || color_eq(cur, raw_accent) || color_eq(cur, raw_icon))
+                                                                lv_obj_set_style_text_color(c, material_accent(m), 0);
+            else if (is_material_text(cur, &secondary))         lv_obj_set_style_text_color(c, secondary ? material_secondary(m) : material_primary(m), 0);
+        } else if (lv_obj_check_type(c, &lv_img_class)) {
+            lv_color_t cur = lv_obj_get_style_img_recolor(c, 0);
+            if (mark == MARK_ICON || color_eq(cur, raw_accent) || color_eq(cur, raw_icon)) {
+                lv_obj_set_style_img_recolor(c, material_icon(m), 0);
+            }
+        }
+        apply_material_rec(c, m);
+    }
 }
 
 /* ---------------- the glass material ---------------- */
 
-static void register_frost(lv_obj_t *panel, lv_obj_t *frost)
+static void register_frost(lv_obj_t *panel, lv_obj_t *frost, lv_obj_t *tint, bool dim)
 {
     if (s_frost_count >= (int) (sizeof(s_frost) / sizeof(s_frost[0]))) return;
-    s_frost[s_frost_count].panel = panel;
-    s_frost[s_frost_count].frost = frost;
-    s_frost_count++;
+    frost_ref_t *r = &s_frost[s_frost_count++];
+    memset(r, 0, sizeof(*r));
+    r->panel = panel;
+    r->frost = frost;
+    r->tint  = tint;
+    r->host  = lv_obj_get_screen(panel);
+    r->dim   = dim;
+    r->last_x = r->last_y = -10000;
 }
 
 static void unregister_frost(lv_obj_t *panel)
@@ -209,36 +413,90 @@ static void unregister_frost(lv_obj_t *panel)
     }
 }
 
+static void frost_drop_host(lv_obj_t *host)
+{
+    for (int i = s_frost_count - 1; i >= 0; i--) {
+        if (s_frost[i].host != host) continue;
+        s_frost[i] = s_frost[s_frost_count - 1];
+        s_frost_count--;
+    }
+}
+
 /* Aim each pane's frost crop at the pane's own screen rectangle, so what shows
- * through the pane is the (softened) wallpaper directly behind it. */
+ * through the pane is the (softened) wallpaper directly behind it, then set
+ * the pane's material from what is actually under it. The material is only
+ * re-applied when it changes bucket, so scrolling does not restyle every
+ * label every frame. */
 static void frost_sync(void)
 {
     for (int i = 0; i < s_frost_count; i++) {
-        if (!s_frost[i].frost) continue;
+        frost_ref_t *r = &s_frost[i];
         lv_area_t a;
-        lv_obj_get_coords(s_frost[i].panel, &a);
-        lv_img_set_offset_x(s_frost[i].frost, (lv_coord_t) -a.x1);
-        lv_img_set_offset_y(s_frost[i].frost, (lv_coord_t) -a.y1);
+        lv_obj_get_coords(r->panel, &a);
+        if (r->frost) {
+            lv_img_set_offset_x(r->frost, (lv_coord_t) -a.x1);
+            lv_img_set_offset_y(r->frost, (lv_coord_t) -a.y1);
+        }
+
+        bool moved = (abs(a.x1 - r->last_x) >= 4) || (abs(a.y1 - r->last_y) >= 4);
+        if (!moved && r->mat_bucket) continue;
+        r->last_x = a.x1;
+        r->last_y = a.y1;
+
+        material_t m = material_for(region_lum(a.x1, a.y1, a.x2, a.y2), r->dim);
+        uint8_t bucket = (uint8_t) (1 + (m.light ? 16 : 0) + (int) (m.substrate * 15.0f));
+        if (bucket == r->mat_bucket && abs((int) m.tint_opa - (int) r->mat.tint_opa) < 20) continue;
+        r->mat_bucket = bucket;
+        r->mat = m;
+
+        if (r->tint) {
+            lv_obj_set_style_bg_color(r->tint, m.light ? lv_color_white() : lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(r->tint, m.tint_opa, 0);
+        }
+        lv_obj_set_style_border_color(r->panel, m.light ? lv_color_black() : lv_color_white(), 0);
+        apply_material_rec(r->panel, &m);
     }
+}
+
+static void scroll_sync_cb(lv_event_t *e)
+{
+    (void) e;
+    frost_sync();
+}
+
+void glass_track_scroll(lv_obj_t *obj)
+{
+    lv_obj_add_event_cb(obj, scroll_sync_cb, LV_EVENT_SCROLL, NULL);
+}
+
+void glass_screen_ready(lv_obj_t *scr)
+{
+    lv_obj_update_layout(scr);
+    frost_sync();
 }
 
 static lv_obj_t *glass_panel_create(lv_obj_t *parent, int w, int h, int radius)
 {
+    bool dim = s_host_dim && lv_obj_get_screen(parent) == s_host;
+
     lv_obj_t *panel = lv_obj_create(parent);
     lv_obj_set_size(panel, w, h);
     lv_obj_set_style_radius(panel, radius, 0);
     lv_obj_set_style_pad_all(panel, 0, 0);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(0x1A1F2E), 0);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_70, 0);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x10141F), 0);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_90, 0);
     lv_obj_set_style_border_width(panel, 1, 0);
     lv_obj_set_style_border_color(panel, lv_color_white(), 0);
-    lv_obj_set_style_border_opa(panel, BORDER_OPA, 0);
+    lv_obj_set_style_border_opa(panel, dim ? LV_OPA_10 : BORDER_OPA, 0);
     lv_obj_set_style_shadow_width(panel, 36, 0);
     lv_obj_set_style_shadow_ofs_y(panel, 12, 0);
     lv_obj_set_style_shadow_color(panel, lv_color_black(), 0);
     lv_obj_set_style_shadow_opa(panel, LV_OPA_40, 0);
     lv_obj_set_style_clip_corner(panel, true, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    /* Not a hit target: a tap on a pane is a tap on the screen, which is what
+     * opens the drawer. Sheets that must hold taps re-add the flag. */
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
     const lv_img_dsc_t *frost_src = wallpaper_image(WALLPAPER_FROST);
@@ -253,18 +511,20 @@ static lv_obj_t *glass_panel_create(lv_obj_t *parent, int w, int h, int radius)
         lv_obj_set_pos(frost, 0, 0);
         lv_obj_clear_flag(frost, LV_OBJ_FLAG_CLICKABLE);
     }
-    register_frost(panel, frost);
 
-    /* Tint: the light film that makes it a pane rather than a window. */
+    /* Tint: the material itself. Colour and opacity are set by frost_sync()
+     * from the wallpaper under the pane; this is only the initial state. */
     lv_obj_t *tint = lv_obj_create(panel);
     lv_obj_set_size(tint, w, h);
     lv_obj_set_pos(tint, 0, 0);
     lv_obj_set_style_radius(tint, radius, 0);
-    lv_obj_set_style_bg_color(tint, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(tint, TINT_OPA, 0);
+    lv_obj_set_style_bg_color(tint, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(tint, LV_OPA_50, 0);
     lv_obj_set_style_border_width(tint, 0, 0);
     lv_obj_set_style_pad_all(tint, 0, 0);
     lv_obj_clear_flag(tint, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    register_frost(panel, frost, tint, dim);
 
     /* Specular edge: a 1px brighter line along the top, the cue that light
      * is catching the upper rim of a slab of glass. */
@@ -273,7 +533,7 @@ static lv_obj_t *glass_panel_create(lv_obj_t *parent, int w, int h, int radius)
     lv_obj_set_pos(spec, radius / 2, 1);
     lv_obj_set_style_radius(spec, 0, 0);
     lv_obj_set_style_bg_color(spec, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(spec, SPECULAR_OPA, 0);
+    lv_obj_set_style_bg_opa(spec, dim ? LV_OPA_20 : SPECULAR_OPA, 0);
     lv_obj_set_style_border_width(spec, 0, 0);
     lv_obj_set_style_pad_all(spec, 0, 0);
     lv_obj_clear_flag(spec, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
@@ -281,14 +541,52 @@ static lv_obj_t *glass_panel_create(lv_obj_t *parent, int w, int h, int radius)
     return panel;
 }
 
+lv_obj_t *glass_pane(lv_obj_t *parent, int w, int h, int radius)
+{
+    return glass_panel_create(parent, w, h, radius);
+}
+
 static lv_obj_t *glass_label(lv_obj_t *parent, const char *text, const lv_font_t *font, lv_opa_t opa)
 {
     lv_obj_t *l = lv_label_create(parent);
     lv_label_set_text(l, text);
     lv_obj_set_style_text_font(l, font, 0);
-    lv_obj_set_style_text_color(l, lv_color_white(), 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(DARK_PRIMARY), 0);
     lv_obj_set_style_text_opa(l, opa, 0);
     lv_obj_clear_flag(l, LV_OBJ_FLAG_CLICKABLE);
+    return l;
+}
+
+static lv_obj_t *glass_caption(lv_obj_t *parent, const char *text)
+{
+    lv_obj_t *l = glass_label(parent, text, &lv_font_montserrat_14, CAPTION_OPA);
+    lv_obj_set_style_text_color(l, lv_color_hex(DARK_SECONDARY), 0);
+    return l;
+}
+
+static lv_obj_t *glass_subvalue(lv_obj_t *parent, const char *text)
+{
+    lv_obj_t *l = glass_label(parent, text, &lv_font_montserrat_16, SUB_OPA);
+    lv_obj_set_style_text_color(l, lv_color_hex(DARK_SECONDARY), 0);
+    return l;
+}
+
+static lv_obj_t *glass_icon_img(lv_obj_t *parent, const lv_img_dsc_t *src)
+{
+    lv_obj_t *i = lv_img_create(parent);
+    lv_img_set_src(i, src);
+    lv_obj_set_style_img_recolor(i, theme_color(THEME_ICON), 0);
+    lv_obj_set_style_img_recolor_opa(i, LV_OPA_COVER, 0);
+    lv_obj_set_user_data(i, MARK_ICON);
+    lv_obj_clear_flag(i, LV_OBJ_FLAG_CLICKABLE);
+    return i;
+}
+
+static lv_obj_t *glass_icon_symbol(lv_obj_t *parent, const char *symbol, const lv_font_t *font)
+{
+    lv_obj_t *l = glass_label(parent, symbol, font, LV_OPA_COVER);
+    lv_obj_set_style_text_color(l, theme_color(THEME_ICON), 0);
+    lv_obj_set_user_data(l, MARK_ICON);
     return l;
 }
 
@@ -297,7 +595,7 @@ static lv_obj_t *glass_round_button(lv_obj_t *parent, const char *symbol, const 
                                     const char *caption, lv_event_cb_t cb, void *user_data, bool active)
 {
     lv_obj_t *cont = lv_obj_create(parent);
-    lv_obj_set_size(cont, 68, 84);
+    lv_obj_set_size(cont, 62, 84);
     lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(cont, 0, 0);
     lv_obj_set_style_pad_all(cont, 0, 0);
@@ -316,22 +614,157 @@ static lv_obj_t *glass_round_button(lv_obj_t *parent, const char *symbol, const 
     lv_obj_set_style_pad_all(btn, 0, 0);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_color_t icon_color = active ? COLOR_TEXT_ON_ACCENT : lv_color_white();
+    /* An active button is a solid accent disc, so its glyph is the on-accent
+     * colour and must not be re-tinted by the material walk: no marker. */
     if (img) {
         lv_obj_t *i = lv_img_create(btn);
         lv_img_set_src(i, img);
-        lv_obj_set_style_img_recolor(i, icon_color, 0);
+        lv_obj_set_style_img_recolor(i, active ? COLOR_TEXT_ON_ACCENT : lv_color_hex(DARK_PRIMARY), 0);
         lv_obj_set_style_img_recolor_opa(i, LV_OPA_COVER, 0);
         lv_obj_center(i);
     } else {
         lv_obj_t *l = glass_label(btn, symbol, &lv_font_montserrat_22, LV_OPA_COVER);
-        lv_obj_set_style_text_color(l, icon_color, 0);
+        if (active) lv_obj_set_style_text_color(l, COLOR_TEXT_ON_ACCENT, 0);
         lv_obj_center(l);
     }
 
-    lv_obj_t *cap = glass_label(cont, caption, &lv_font_montserrat_12, LV_OPA_80);
+    lv_obj_t *cap = glass_label(cont, caption, &lv_font_montserrat_12, CAPTION_OPA);
     lv_obj_align(cap, LV_ALIGN_BOTTOM_MID, 0, 0);
     return cont;
+}
+
+/* ---------------- stock widget styling ---------------- */
+
+void glass_pill_label(lv_obj_t *label, bool accent)
+{
+    material_t dark = { .light = false, .substrate = 0.08f, .tint_opa = 0 };
+    lv_obj_set_style_bg_color(label, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(label, LV_OPA_60, 0);
+    lv_obj_set_style_radius(label, 10, 0);
+    lv_obj_set_style_pad_hor(label, 10, 0);
+    lv_obj_set_style_pad_ver(label, 3, 0);
+    lv_obj_set_style_text_color(label, accent ? vibrant(theme_color(THEME_ACCENT), &dark)
+                                              : lv_color_hex(DARK_PRIMARY), 0);
+}
+
+void glass_style_button(lv_obj_t *btn, bool filled)
+{
+    lv_obj_set_style_bg_color(btn, filled ? COLOR_ACCENT : lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(btn, filled ? LV_OPA_COVER : LV_OPA_20, 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_border_color(btn, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(btn, filled ? LV_OPA_TRANSP : LV_OPA_30, 0);
+    lv_obj_set_style_radius(btn, 12, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_40, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_10, LV_STATE_DISABLED);
+    lv_obj_t *label = lv_obj_get_child(btn, 0);
+    if (label) {
+        /* A filled button's label is on the accent, not on the material. */
+        lv_obj_set_style_text_color(label, filled ? COLOR_TEXT_ON_ACCENT : lv_color_hex(DARK_PRIMARY), 0);
+        if (filled) lv_obj_set_user_data(label, (void *) 3);
+    }
+}
+
+void glass_style_dropdown(lv_obj_t *dd)
+{
+    lv_obj_set_style_bg_color(dd, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(dd, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(dd, 1, 0);
+    lv_obj_set_style_border_color(dd, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(dd, LV_OPA_30, 0);
+    lv_obj_set_style_radius(dd, 10, 0);
+    lv_obj_set_style_text_color(dd, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(dd, LV_OPA_40, LV_STATE_PRESSED);
+    /* The list floats over the wallpaper, so it is nearly opaque. */
+    lv_obj_t *list = lv_dropdown_get_list(dd);
+    if (list) {
+        lv_obj_set_style_bg_color(list, lv_color_hex(0x141A2A), 0);
+        lv_obj_set_style_bg_opa(list, LV_OPA_90, 0);
+        lv_obj_set_style_border_width(list, 1, 0);
+        lv_obj_set_style_border_color(list, lv_color_white(), 0);
+        lv_obj_set_style_border_opa(list, LV_OPA_30, 0);
+        lv_obj_set_style_radius(list, 12, 0);
+        lv_obj_set_style_text_color(list, lv_color_white(), 0);
+        lv_obj_set_style_bg_color(list, COLOR_ACCENT, LV_PART_SELECTED | LV_STATE_CHECKED);
+        lv_obj_set_style_text_color(list, COLOR_TEXT_ON_ACCENT, LV_PART_SELECTED | LV_STATE_CHECKED);
+    }
+}
+
+void glass_style_slider(lv_obj_t *slider)
+{
+    lv_obj_set_style_bg_color(slider, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, COLOR_ACCENT, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider, lv_color_white(), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_style_shadow_width(slider, 10, LV_PART_KNOB);
+    lv_obj_set_style_shadow_opa(slider, LV_OPA_40, LV_PART_KNOB);
+    lv_obj_set_style_shadow_color(slider, lv_color_black(), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_10, LV_PART_MAIN | LV_STATE_DISABLED);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_30, LV_PART_INDICATOR | LV_STATE_DISABLED);
+}
+
+void glass_style_textarea(lv_obj_t *ta)
+{
+    lv_obj_set_style_bg_color(ta, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(ta, 1, 0);
+    lv_obj_set_style_border_color(ta, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(ta, LV_OPA_30, 0);
+    lv_obj_set_style_border_color(ta, COLOR_ACCENT, LV_STATE_FOCUSED);
+    lv_obj_set_style_border_opa(ta, LV_OPA_COVER, LV_STATE_FOCUSED);
+    lv_obj_set_style_radius(ta, 10, 0);
+    lv_obj_set_style_text_color(ta, lv_color_white(), 0);
+    lv_obj_set_style_text_color(ta, lv_color_white(), LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_text_opa(ta, LV_OPA_50, LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_bg_color(ta, COLOR_ACCENT, LV_PART_CURSOR | LV_STATE_FOCUSED);
+}
+
+/* Typing needs certainty, so the keyboard is an opaque dark slab rather than
+ * glass: the wallpaper must not compete with the key legends. */
+void glass_style_keyboard(lv_obj_t *kb)
+{
+    lv_obj_set_style_bg_color(kb, lv_color_hex(0x0E1220), 0);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(kb, 1, 0);
+    lv_obj_set_style_border_color(kb, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(kb, LV_OPA_20, 0);
+    lv_obj_set_style_radius(kb, 18, 0);
+    lv_obj_set_style_pad_all(kb, 8, 0);
+    lv_obj_set_style_bg_color(kb, lv_color_white(), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_20, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(kb, 0, LV_PART_ITEMS);
+    lv_obj_set_style_radius(kb, 8, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(kb, lv_color_white(), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(kb, COLOR_ACCENT, LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(kb, COLOR_TEXT_ON_ACCENT, LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_50, LV_PART_ITEMS | LV_STATE_PRESSED);
+}
+
+void glass_style_checkbox(lv_obj_t *cb)
+{
+    lv_obj_set_style_text_color(cb, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(cb, lv_color_white(), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(cb, LV_OPA_20, LV_PART_INDICATOR);
+    lv_obj_set_style_border_color(cb, lv_color_white(), LV_PART_INDICATOR);
+    lv_obj_set_style_border_opa(cb, LV_OPA_50, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(cb, 6, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(cb, COLOR_ACCENT, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(cb, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_border_opa(cb, LV_OPA_TRANSP, LV_PART_INDICATOR | LV_STATE_CHECKED);
+}
+
+void glass_style_bar(lv_obj_t *bar)
+{
+    lv_obj_set_style_bg_color(bar, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_20, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar, COLOR_ACCENT, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, 8, 0);
 }
 
 /* ---------------- widgets ---------------- */
@@ -339,9 +772,9 @@ static lv_obj_t *glass_round_button(lv_obj_t *parent, const char *symbol, const 
 static const lv_img_dsc_t *widget_icon_img(glass_widget_t id)
 {
     switch (id) {
-    case GLASS_WIDGET_TEMPERATURE: return &temperature_icon;
-    case GLASS_WIDGET_BEST_DIFF:   return &star;
-    case GLASS_WIDGET_FAN:         return &fan;
+    case GLASS_WIDGET_TEMPERATURE: return &glass_icon_thermo;
+    case GLASS_WIDGET_BEST_DIFF:   return &glass_icon_star;
+    case GLASS_WIDGET_FAN:         return &glass_icon_fan;
     case GLASS_WIDGET_BLOCK:       return &cube_solid_full;
     case GLASS_WIDGET_MEMPOOL:     return &cubes_solid_full;
     case GLASS_WIDGET_CLOCK:       return &clock_solid_full;
@@ -360,53 +793,19 @@ static const char *widget_icon_symbol(glass_widget_t id)
     }
 }
 
-/* Caption icon at (x, y) in a 24px box. The star and fan assets are 1-bit
- * alpha bitmaps, which LVGL 8's software renderer cannot scale, so those two
- * are placed at native size as a faint watermark on the card's right instead
- * (see widget_watermark) and get no caption icon. */
+/* Caption icon centred in a 24px box at (x, y). Every widget uses the same
+ * treatment: a 24px glyph in the icon tint beside its caption. */
 static void widget_icon(lv_obj_t *parent, glass_widget_t id, int x, int y)
 {
     const lv_img_dsc_t *img = widget_icon_img(id);
-    if (img && img->header.cf == LV_IMG_CF_ALPHA_1BIT) return;
     if (img) {
-        lv_obj_t *i = lv_img_create(parent);
-        lv_img_set_src(i, img);
-        lv_obj_set_style_img_recolor(i, COLOR_ACCENT, 0);
-        lv_obj_set_style_img_recolor_opa(i, LV_OPA_COVER, 0);
-        int native = (int) img->header.w;
-        if (native > 26) {
-            /* Zoom is 256 = 1:1 and pivots on the centre, so the object keeps
-             * its native box and the drawn icon shrinks inside it. */
-            lv_img_set_zoom(i, (uint16_t) (256 * 24 / native));
-            lv_obj_set_pos(i, x - (native - 24) / 2, y - (native - 24) / 2);
-        } else {
-            lv_obj_set_pos(i, x + (24 - native) / 2, y + (24 - native) / 2);
-        }
-        lv_obj_clear_flag(i, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t *i = glass_icon_img(parent, img);
+        int w = (int) img->header.w, h = (int) img->header.h;
+        lv_obj_set_pos(i, x + (24 - w) / 2, y + (24 - h) / 2);
     } else {
-        lv_obj_t *l = glass_label(parent, widget_icon_symbol(id), &lv_font_montserrat_20, LV_OPA_COVER);
-        lv_obj_set_style_text_color(l, COLOR_ACCENT, 0);
+        lv_obj_t *l = glass_icon_symbol(parent, widget_icon_symbol(id), &lv_font_montserrat_20);
         lv_obj_set_pos(l, x + 2, y + 1);
     }
-}
-
-static bool widget_icon_is_caption(glass_widget_t id)
-{
-    const lv_img_dsc_t *img = widget_icon_img(id);
-    return !(img && img->header.cf == LV_IMG_CF_ALPHA_1BIT);
-}
-
-static void widget_watermark(lv_obj_t *card, glass_widget_t id, lv_align_t align, int x, int y)
-{
-    const lv_img_dsc_t *img = widget_icon_img(id);
-    if (!img || img->header.cf != LV_IMG_CF_ALPHA_1BIT) return;
-    lv_obj_t *i = lv_img_create(card);
-    lv_img_set_src(i, img);
-    lv_obj_set_style_img_recolor(i, COLOR_ACCENT, 0);
-    lv_obj_set_style_img_recolor_opa(i, LV_OPA_COVER, 0);
-    lv_obj_set_style_img_opa(i, LV_OPA_50, 0);
-    lv_obj_align(i, align, x, y);
-    lv_obj_clear_flag(i, LV_OBJ_FLAG_CLICKABLE);
 }
 
 static const char *nz(const char *s, const char *fallback)
@@ -440,6 +839,17 @@ static void set_if_changed(lv_obj_t *label, const char *text)
     if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
 }
 
+/* Sit `small` on the same baseline as `big`, to its right. A label's box ends
+ * base_line pixels below its baseline, so the boxes are offset by the
+ * difference of the two fonts' descents. */
+static void align_baseline(lv_obj_t *small, lv_obj_t *big, int gap)
+{
+    const lv_font_t *fb = lv_obj_get_style_text_font(big, 0);
+    const lv_font_t *fs = lv_obj_get_style_text_font(small, 0);
+    lv_obj_update_layout(big);
+    lv_obj_align_to(small, big, LV_ALIGN_OUT_RIGHT_BOTTOM, gap, (int) fs->base_line - (int) fb->base_line);
+}
+
 /* Push the latest figures into a card. Only labels whose text actually
  * changed are touched, so a steady value costs no redraw of its pane. */
 static void card_refresh(card_t *c)
@@ -463,10 +873,8 @@ static void card_refresh(card_t *c)
         }
         set_if_changed(c->value, buf);
         set_if_changed(c->value2, buf2);
-        lv_obj_update_layout(c->value);
-        lv_obj_align_to(c->value2, c->value, LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -18);
-        lv_obj_update_layout(c->value2);
-        lv_obj_align_to(c->unit, buf2[0] ? c->value2 : c->value, LV_ALIGN_OUT_RIGHT_BOTTOM, 10, buf2[0] ? 0 : -18);
+        align_baseline(c->value2, c->value, 4);
+        align_baseline(c->unit, buf2[0] ? c->value2 : c->value, 10);
         set_if_changed(c->aux, nz(st->efficiency, "-- J/TH"));
         snprintf(buf, sizeof(buf), "%s  %s", nz(st->hardware->model, "Bitaxe"), nz(st->hardware->chip, ""));
         set_if_changed(c->sub, buf);
@@ -558,22 +966,23 @@ static void build_hero(card_t *c)
     lv_obj_t *card = glass_panel_create(s_grid, CONTENT_W, HERO_H, CARD_RADIUS);
     c->card = card;
 
-    lv_obj_t *cap = glass_label(card, widget_caption(c->id), &lv_font_montserrat_14, TEXT_DIM_OPA);
+    lv_obj_t *cap = glass_caption(card, widget_caption(c->id));
     lv_obj_set_pos(cap, 26, 18);
 
     c->value = glass_label(card, "--", &montserrat_120, LV_OPA_COVER);
     lv_obj_align(c->value, LV_ALIGN_LEFT_MID, 22, 14);
 
-    c->value2 = glass_label(card, "", &lv_font_montserrat_40, LV_OPA_90);
+    c->value2 = glass_label(card, "", &lv_font_montserrat_40, LV_OPA_COVER);
     c->unit = glass_label(card, "GH/s", &lv_font_montserrat_26, LV_OPA_COVER);
-    lv_obj_set_style_text_color(c->unit, COLOR_ACCENT, 0);
+    lv_obj_set_user_data(c->unit, MARK_ACCENT);
 
-    c->aux = glass_label(card, "-- J/TH", &lv_font_montserrat_28, LV_OPA_90);
+    c->aux = glass_label(card, "-- J/TH", &lv_font_montserrat_28, LV_OPA_COVER);
     lv_obj_align(c->aux, LV_ALIGN_TOP_RIGHT, -26, 18);
-    lv_obj_t *aux_cap = glass_label(card, "EFFICIENCY", &lv_font_montserrat_12, TEXT_DIM_OPA);
+    lv_obj_t *aux_cap = glass_caption(card, "EFFICIENCY");
+    lv_obj_set_style_text_font(aux_cap, &lv_font_montserrat_12, 0);
     lv_obj_align(aux_cap, LV_ALIGN_TOP_RIGHT, -26, 54);
 
-    c->sub = glass_label(card, "", &lv_font_montserrat_14, TEXT_DIM_OPA);
+    c->sub = glass_subvalue(card, "");
     lv_obj_align(c->sub, LV_ALIGN_BOTTOM_RIGHT, -26, -18);
 }
 
@@ -583,21 +992,20 @@ static void build_twin_card(card_t *c)
     c->card = card;
 
     widget_icon(card, c->id, 22, 18);
-    widget_watermark(card, c->id, LV_ALIGN_RIGHT_MID, -22, 0);
-    lv_obj_t *cap = glass_label(card, widget_caption(c->id), &lv_font_montserrat_14, TEXT_DIM_OPA);
-    lv_obj_set_pos(cap, widget_icon_is_caption(c->id) ? 56 : 24, 22);
+    lv_obj_t *cap = glass_caption(card, widget_caption(c->id));
+    lv_obj_set_pos(cap, 56, 22);
 
     const lv_font_t *vf = (c->id == GLASS_WIDGET_POOL) ? &lv_font_montserrat_22 : &lv_font_montserrat_36;
     c->value = glass_label(card, "--", vf, LV_OPA_COVER);
     lv_obj_set_width(c->value, TWIN_W - 48);
     lv_label_set_long_mode(c->value, LV_LABEL_LONG_DOT);
-    lv_obj_align(c->value, LV_ALIGN_BOTTOM_LEFT, 22, widget_has_sub(c->id) ? -36 : -22);
+    lv_obj_align(c->value, LV_ALIGN_BOTTOM_LEFT, 22, widget_has_sub(c->id) ? -38 : -22);
 
     if (widget_has_sub(c->id)) {
-        c->sub = glass_label(card, "", &lv_font_montserrat_14, TEXT_DIM_OPA);
+        c->sub = glass_subvalue(card, "");
         lv_obj_set_width(c->sub, TWIN_W - 48);
         lv_label_set_long_mode(c->sub, LV_LABEL_LONG_DOT);
-        lv_obj_align(c->sub, LV_ALIGN_BOTTOM_LEFT, 24, -16);
+        lv_obj_align(c->sub, LV_ALIGN_BOTTOM_LEFT, 24, -14);
     }
 }
 
@@ -607,15 +1015,14 @@ static void build_single_card(card_t *c)
     c->card = card;
 
     widget_icon(card, c->id, 26, (SINGLE_H - 24) / 2);
-    widget_watermark(card, c->id, LV_ALIGN_RIGHT_MID, -380, 0);
-    lv_obj_t *cap = glass_label(card, widget_caption(c->id), &lv_font_montserrat_14, TEXT_DIM_OPA);
-    lv_obj_align(cap, LV_ALIGN_LEFT_MID, widget_icon_is_caption(c->id) ? 64 : 28, widget_has_sub(c->id) ? -12 : 0);
+    lv_obj_t *cap = glass_caption(card, widget_caption(c->id));
+    lv_obj_align(cap, LV_ALIGN_LEFT_MID, 64, widget_has_sub(c->id) ? -13 : 0);
 
     if (widget_has_sub(c->id)) {
-        c->sub = glass_label(card, "", &lv_font_montserrat_14, LV_OPA_80);
+        c->sub = glass_subvalue(card, "");
         lv_obj_set_width(c->sub, 330);
         lv_label_set_long_mode(c->sub, LV_LABEL_LONG_DOT);
-        lv_obj_align(c->sub, LV_ALIGN_LEFT_MID, 64, 12);
+        lv_obj_align(c->sub, LV_ALIGN_LEFT_MID, 64, 13);
     }
 
     const lv_font_t *vf = (c->id == GLASS_WIDGET_POOL) ? &lv_font_montserrat_22 : &lv_font_montserrat_36;
@@ -624,12 +1031,6 @@ static void build_single_card(card_t *c)
     lv_label_set_long_mode(c->value, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(c->value, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_align(c->value, LV_ALIGN_RIGHT_MID, -26, 0);
-}
-
-static void grid_scroll_cb(lv_event_t *e)
-{
-    (void) e;
-    frost_sync();
 }
 
 static void build_grid(void)
@@ -660,11 +1061,11 @@ static void build_grid(void)
     lv_obj_set_flex_align(s_grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_scroll_dir(s_grid, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_grid, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_add_event_cb(s_grid, grid_scroll_cb, LV_EVENT_SCROLL, NULL);
-    lv_obj_add_event_cb(s_grid, drawer_toggle_cb, LV_EVENT_CLICKED, NULL);
+    glass_track_scroll(s_grid);
+    glass_attach_drawer_toggle(s_grid);
     /* Keep the drawer above the grid whatever order things were built in. */
     lv_obj_move_background(s_grid);
-    if (s_wall_img) lv_obj_move_background(s_wall_img);
+    if (s_host_wall) lv_obj_move_background(s_host_wall);
 
     for (int id = 0; id < GLASS_WIDGET_COUNT; id++) {
         if (!(s_mask & (1u << id))) continue;
@@ -677,7 +1078,7 @@ static void build_grid(void)
     }
 
     if (s_card_count == 0) {
-        lv_obj_t *hint = glass_label(s_grid, "Tap to open the menu and choose widgets", &lv_font_montserrat_18, TEXT_DIM_OPA);
+        lv_obj_t *hint = glass_label(s_grid, "Tap to open the menu and choose widgets", &lv_font_montserrat_18, CAPTION_OPA);
         lv_obj_set_width(hint, CONTENT_W);
         lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
     }
@@ -685,8 +1086,7 @@ static void build_grid(void)
     if (s_mask & (1u << GLASS_WIDGET_PRICE))   price_ensure_task();
     if (s_mask & (1u << GLASS_WIDGET_MEMPOOL)) mempool_ensure_task();
 
-    lv_obj_update_layout(s_screen);
-    frost_sync();
+    glass_screen_ready(s_screen);
 }
 
 static void rebuild_grid_async(void *unused)
@@ -703,12 +1103,43 @@ static void refresh_cb(lv_timer_t *t)
     for (int i = 0; i < s_card_count; i++) card_refresh(&s_cards[i]);
 }
 
+/* ---------------- navigation ---------------- */
+
+typedef struct {
+    void      (*create)(void);
+    lv_obj_t *(*get)(void);
+    void      (*destroy)(void);
+} nav_fns_t;
+
+static const nav_fns_t k_nav[GLASS_SCREEN_COUNT] = {
+    { home_screen_create,     home_get_screen,     home_screen_destroy     },
+    { block_screen_create,    block_get_screen,    block_screen_destroy    },
+    { mempool_screen_create,  mempool_get_screen,  mempool_screen_destroy  },
+    { clock_screen_create,    clock_get_screen,    clock_screen_destroy    },
+    { price_screen_create,    price_get_screen,    price_screen_destroy    },
+    { wifi_screen_create,     wifi_get_screen,     wifi_screen_destroy     },
+    { settings_screen_create, settings_get_screen, settings_screen_destroy },
+    { night_screen_create,    night_get_screen,    night_screen_destroy    },
+};
+
+/* Same order as every classic handler: build the next screen, load it, then
+ * tear down the one we came from. Deleting the loaded screen first would leave
+ * LVGL's active-screen pointer dangling. */
+static void glass_navigate(glass_screen_t target)
+{
+    if (target < 0 || target >= GLASS_SCREEN_COUNT) return;
+    glass_screen_t from = s_host_kind;
+    if (target == from) { glass_drawer_close(); return; }
+    k_nav[target].create();
+    lv_scr_load(k_nav[target].get());
+    k_nav[from].destroy();
+}
+
 /* ---------------- drawer ---------------- */
 
 static void drawer_nav_cb(lv_event_t *e)
 {
-    lv_event_cb_t target = (lv_event_cb_t) lv_event_get_user_data(e);
-    if (target) target(e);
+    glass_navigate((glass_screen_t) (intptr_t) lv_event_get_user_data(e));
 }
 
 static void drawer_sheet_cb(lv_event_t *e)
@@ -732,6 +1163,11 @@ static void drawer_toggle_cb(lv_event_t *e)
     else               glass_drawer_open();
 }
 
+void glass_attach_drawer_toggle(lv_obj_t *obj)
+{
+    lv_obj_add_event_cb(obj, drawer_toggle_cb, LV_EVENT_CLICKED, NULL);
+}
+
 static void drawer_anim_cb(void *obj, int32_t v)
 {
     lv_obj_set_y((lv_obj_t *) obj, (lv_coord_t) v);
@@ -744,6 +1180,7 @@ static void drawer_closed_cb(lv_anim_t *a)
     s_drawer_anim = false;
     if (s_drawer_sheet) { unregister_frost(s_drawer_sheet); lv_obj_del(s_drawer_sheet); s_drawer_sheet = NULL; }
     if (s_drawer_scrim) { lv_obj_del(s_drawer_scrim); s_drawer_scrim = NULL; }
+    s_drawer_host = NULL;
 }
 
 static void drawer_opened_cb(lv_anim_t *a)
@@ -766,18 +1203,34 @@ static void drawer_slide(lv_obj_t *sheet, int from, int to, lv_anim_ready_cb_t d
     lv_anim_start(&a);
 }
 
+/* Forget the drawer without touching its objects: the screen they sit on is
+ * being deleted and takes them with it. */
+static void drawer_reset(void)
+{
+    if (s_drawer_sheet) lv_anim_del(s_drawer_sheet, drawer_anim_cb);
+    s_drawer_sheet = NULL;
+    s_drawer_scrim = NULL;
+    s_drawer_host  = NULL;
+    s_drawer_open  = false;
+    s_drawer_anim  = false;
+}
+
 bool glass_drawer_is_open(void) { return s_drawer_open; }
 
 /* Bottom drawer. On a landscape panel that sits on a desk the bottom edge is
  * where a hand naturally rests, it is where the classic nav bar lived so the
  * muscle memory carries over, and a sheet rising from the bottom never covers
- * the hero figure at the top of the surface. */
+ * the hero figure at the top of the surface. There is no separate back
+ * control: Home is always the first button, so "back" is the same gesture as
+ * everything else, and a permanent back chevron would be exactly the kind of
+ * chrome the full-screen surface exists to remove. */
 void glass_drawer_open(void)
 {
-    if (!s_screen || s_drawer_open || s_drawer_anim) return;
+    if (!s_host || s_drawer_open || s_drawer_anim) return;
     s_drawer_open = true;
+    s_drawer_host = s_host;
 
-    s_drawer_scrim = lv_obj_create(s_screen);
+    s_drawer_scrim = lv_obj_create(s_host);
     lv_obj_set_size(s_drawer_scrim, SCREEN_WIDTH, SCREEN_HEIGHT);
     lv_obj_set_pos(s_drawer_scrim, 0, 0);
     lv_obj_set_style_bg_color(s_drawer_scrim, lv_color_black(), 0);
@@ -789,7 +1242,8 @@ void glass_drawer_open(void)
     lv_obj_add_event_cb(s_drawer_scrim, drawer_scrim_cb, LV_EVENT_CLICKED, NULL);
 
     const int sheet_w = SCREEN_WIDTH - 2 * DRAWER_MARGIN;
-    s_drawer_sheet = glass_panel_create(s_screen, sheet_w, DRAWER_H, 30);
+    s_drawer_sheet = glass_panel_create(s_host, sheet_w, DRAWER_H, 30);
+    lv_obj_add_flag(s_drawer_sheet, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_pos(s_drawer_sheet, DRAWER_MARGIN, SCREEN_HEIGHT);
 
     /* iOS grabber, purely a cue that this is a sheet. */
@@ -812,25 +1266,33 @@ void glass_drawer_open(void)
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    glass_round_button(row, LV_SYMBOL_LIST,     NULL, "Widgets",   drawer_sheet_cb, (void *) GLASS_SHEET_WIDGETS,   false);
-    glass_round_button(row, LV_SYMBOL_BARS,     NULL, "Layout",    drawer_sheet_cb, (void *) GLASS_SHEET_LAYOUT,    false);
-    glass_round_button(row, LV_SYMBOL_IMAGE,    NULL, "Wallpaper", drawer_sheet_cb, (void *) GLASS_SHEET_WALLPAPER, false);
-    glass_round_button(row, NULL, &cube_solid_full,   "Blocks",    drawer_nav_cb, (void *) home_block_clicked,   false);
-    glass_round_button(row, NULL, &cubes_solid_full,  "Mempool",   drawer_nav_cb, (void *) home_mempool_clicked, false);
-    glass_round_button(row, NULL, &clock_solid_full,  "Clock",     drawer_nav_cb, (void *) home_clock_clicked,   false);
-    glass_round_button(row, "$",                NULL, "Price",     drawer_nav_cb, (void *) home_price_clicked,   false);
-    glass_round_button(row, LV_SYMBOL_UPLOAD,   NULL, "Pool",      drawer_sheet_cb, (void *) GLASS_SHEET_POOL,      false);
-    glass_round_button(row, LV_SYMBOL_WIFI,     NULL, "Wi-Fi",     drawer_nav_cb, (void *) home_wifi_clicked,    false);
-    glass_round_button(row, LV_SYMBOL_SETTINGS, NULL, "Settings",  drawer_nav_cb, (void *) home_settings_clicked, false);
-    glass_round_button(row, LV_SYMBOL_EYE_OPEN, NULL, "Night",     drawer_nav_cb, (void *) home_night_clicked,   false);
+    const glass_screen_t k = s_host_kind;
+    if (k == GLASS_SCREEN_HOME) {
+        /* The surface's own controls come first on home; elsewhere Home takes
+         * that slot so the way back is always in the same place. */
+        glass_round_button(row, LV_SYMBOL_LIST,  NULL, "Widgets",   drawer_sheet_cb, (void *) GLASS_SHEET_WIDGETS, false);
+        glass_round_button(row, LV_SYMBOL_BARS,  NULL, "Layout",    drawer_sheet_cb, (void *) GLASS_SHEET_LAYOUT,  false);
+    } else {
+        glass_round_button(row, LV_SYMBOL_HOME,  NULL, "Home",      drawer_nav_cb, (void *) GLASS_SCREEN_HOME, false);
+    }
+    glass_round_button(row, LV_SYMBOL_IMAGE,     NULL, "Wallpaper", drawer_sheet_cb, (void *) GLASS_SHEET_WALLPAPER, false);
+    glass_round_button(row, LV_SYMBOL_TINT,      NULL, "Icons",     drawer_sheet_cb, (void *) GLASS_SHEET_ICONS, false);
+    glass_round_button(row, NULL, &cube_solid_full,   "Blocks",    drawer_nav_cb, (void *) GLASS_SCREEN_BLOCK,    k == GLASS_SCREEN_BLOCK);
+    glass_round_button(row, NULL, &cubes_solid_full,  "Mempool",   drawer_nav_cb, (void *) GLASS_SCREEN_MEMPOOL,  k == GLASS_SCREEN_MEMPOOL);
+    glass_round_button(row, NULL, &clock_solid_full,  "Clock",     drawer_nav_cb, (void *) GLASS_SCREEN_CLOCK,    k == GLASS_SCREEN_CLOCK);
+    glass_round_button(row, "$",                 NULL, "Price",     drawer_nav_cb, (void *) GLASS_SCREEN_PRICE,    k == GLASS_SCREEN_PRICE);
+    glass_round_button(row, LV_SYMBOL_UPLOAD,    NULL, "Pool",      drawer_sheet_cb, (void *) GLASS_SHEET_POOL, false);
+    glass_round_button(row, LV_SYMBOL_WIFI,      NULL, "Wi-Fi",     drawer_nav_cb, (void *) GLASS_SCREEN_WIFI,     k == GLASS_SCREEN_WIFI);
+    glass_round_button(row, LV_SYMBOL_SETTINGS,  NULL, "Settings",  drawer_nav_cb, (void *) GLASS_SCREEN_SETTINGS, k == GLASS_SCREEN_SETTINGS);
+    glass_round_button(row, LV_SYMBOL_EYE_OPEN,  NULL, "Night",     drawer_nav_cb, (void *) GLASS_SCREEN_NIGHT,    k == GLASS_SCREEN_NIGHT);
 
-    lv_obj_update_layout(s_screen);
+    lv_obj_update_layout(s_host);
     drawer_slide(s_drawer_sheet, SCREEN_HEIGHT, SCREEN_HEIGHT - DRAWER_H - DRAWER_MARGIN, drawer_opened_cb);
 }
 
 void glass_drawer_close(void)
 {
-    if (!s_screen || !s_drawer_open) return;
+    if (!s_drawer_open || !s_drawer_sheet) return;
     s_drawer_open = false;
     if (s_drawer_anim) {
         lv_anim_del(s_drawer_sheet, drawer_anim_cb);
@@ -872,9 +1334,19 @@ static void wallpaper_pick_cb(lv_event_t *e)
     glass_sheet_close();
 }
 
+static void icon_pick_cb(lv_event_t *e)
+{
+    int idx = (int) (intptr_t) lv_event_get_user_data(e);
+    if (idx < 0 || idx >= ICON_CHOICE_COUNT) return;
+    theme_set_icon_override(k_icon_choices[idx].rgb);
+    glass_sheet_close();
+    material_reapply_all();
+}
+
 static lv_obj_t *sheet_frame(int w, int h, const char *title)
 {
-    s_sheet_scrim = lv_obj_create(s_screen);
+    s_sheet_host = s_host;
+    s_sheet_scrim = lv_obj_create(s_host);
     lv_obj_set_size(s_sheet_scrim, SCREEN_WIDTH, SCREEN_HEIGHT);
     lv_obj_set_pos(s_sheet_scrim, 0, 0);
     lv_obj_set_style_bg_color(s_sheet_scrim, lv_color_black(), 0);
@@ -885,7 +1357,8 @@ static lv_obj_t *sheet_frame(int w, int h, const char *title)
     lv_obj_clear_flag(s_sheet_scrim, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_sheet_scrim, sheet_close_cb, LV_EVENT_CLICKED, NULL);
 
-    s_sheet_panel = glass_panel_create(s_screen, w, h, 28);
+    s_sheet_panel = glass_panel_create(s_host, w, h, 28);
+    lv_obj_add_flag(s_sheet_panel, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(s_sheet_panel, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t *t = glass_label(s_sheet_panel, title, &lv_font_montserrat_22, LV_OPA_COVER);
@@ -916,7 +1389,7 @@ static void build_widgets_sheet(void)
         int col = id / 6, row = id % 6;
         int x = 28 + col * 306, y = 70 + row * 52;
 
-        lv_obj_t *name = glass_label(p, k_widget_names[id], &lv_font_montserrat_18, LV_OPA_90);
+        lv_obj_t *name = glass_label(p, k_widget_names[id], &lv_font_montserrat_18, LV_OPA_COVER);
         lv_obj_set_pos(name, x, y + 6);
 
         lv_obj_t *sw = lv_switch_create(p);
@@ -958,7 +1431,6 @@ static lv_obj_t *layout_tile(lv_obj_t *parent, glass_layout_t which, int x)
     int rows = (which == GLASS_LAYOUT_SINGLE) ? 3 : 2;
     int bar_h = (which == GLASS_LAYOUT_SINGLE) ? 22 : 40;
     int y = py;
-    /* hero bar */
     lv_obj_t *hero = lv_obj_create(tile);
     lv_obj_set_size(hero, pw, 44);
     lv_obj_set_pos(hero, px, y);
@@ -985,11 +1457,11 @@ static lv_obj_t *layout_tile(lv_obj_t *parent, glass_layout_t which, int x)
     }
 
     lv_obj_t *cap = glass_label(tile, which == GLASS_LAYOUT_SINGLE ? "Single column" : "Twin column",
-                                &lv_font_montserrat_16, LV_OPA_90);
+                                &lv_font_montserrat_16, LV_OPA_COVER);
     lv_obj_align(cap, LV_ALIGN_BOTTOM_MID, 0, -14);
     if (selected) {
         lv_obj_t *tick = glass_label(tile, LV_SYMBOL_OK, &lv_font_montserrat_16, LV_OPA_COVER);
-        lv_obj_set_style_text_color(tick, COLOR_ACCENT, 0);
+        lv_obj_set_user_data(tick, MARK_ACCENT);
         lv_obj_align(tick, LV_ALIGN_TOP_RIGHT, -12, 10);
     }
     return tile;
@@ -1034,12 +1506,62 @@ static void build_wallpaper_sheet(void)
             lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
         }
 
-        lv_obj_t *cap = glass_label(p, wallpaper_name(i), &lv_font_montserrat_16, LV_OPA_90);
+        lv_obj_t *cap = glass_label(p, wallpaper_name(i), &lv_font_montserrat_16, LV_OPA_COVER);
         lv_obj_set_width(cap, THUMB_W);
         lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(cap, x, 70 + THUMB_H + 24);
-        if (selected) lv_obj_set_style_text_color(cap, COLOR_ACCENT, 0);
+        if (selected) lv_obj_set_user_data(cap, MARK_ACCENT);
     }
+}
+
+/* Icon tint picker: the palette accent by default, or a fixed colour that
+ * suits the wallpaper better. Each swatch shows the colour as it will actually
+ * be drawn, i.e. after the vibrancy step. */
+static void build_icons_sheet(void)
+{
+    lv_obj_t *p = sheet_frame(640, 250, "Icon colour");
+    uint32_t current = theme_get_icon_override();
+
+    lv_obj_t *demo = glass_icon_img(p, &glass_icon_star);
+    lv_obj_align(demo, LV_ALIGN_TOP_RIGHT, -70, 28);
+
+    for (int i = 0; i < ICON_CHOICE_COUNT; i++) {
+        bool selected = (k_icon_choices[i].rgb == current);
+        int x = 36 + i * 82;
+
+        lv_obj_t *ring = lv_obj_create(p);
+        lv_obj_set_size(ring, 64, 64);
+        lv_obj_set_pos(ring, x, 84);
+        lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(ring, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(ring, LV_OPA_10, 0);
+        lv_obj_set_style_border_width(ring, 3, 0);
+        lv_obj_set_style_border_color(ring, lv_color_white(), 0);
+        lv_obj_set_style_border_opa(ring, selected ? LV_OPA_COVER : LV_OPA_20, 0);
+        lv_obj_set_style_pad_all(ring, 0, 0);
+        lv_obj_clear_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(ring, icon_pick_cb, LV_EVENT_CLICKED, (void *) (intptr_t) i);
+
+        lv_color_t base = k_icon_choices[i].rgb ? lv_color_hex(k_icon_choices[i].rgb) : theme_color(THEME_ACCENT);
+        material_t dark_m = { .light = false, .substrate = 0.10f, .tint_opa = 0 };
+        lv_obj_t *dot = lv_obj_create(ring);
+        lv_obj_set_size(dot, 40, 40);
+        lv_obj_center(dot);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(dot, vibrant(base, &dark_m), 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(dot, 0, 0);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *cap = glass_label(p, k_icon_choices[i].name, &lv_font_montserrat_14, CAPTION_OPA);
+        lv_obj_set_width(cap, 64);
+        lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(cap, x, 158);
+    }
+
+    lv_obj_t *hint = glass_caption(p, "Icons are lifted for contrast on every pane; Accent follows the colour theme.");
+    lv_obj_set_width(hint, 580);
+    lv_obj_set_pos(hint, 30, 200);
 }
 
 static void build_pool_sheet(void)
@@ -1051,7 +1573,7 @@ static void build_pool_sheet(void)
     const char *labels[3] = { "URL", "Port", "Worker" };
     const char *values[3] = { st->pool->url, st->pool->port, st->pool->worker_name };
     for (int i = 0; i < 3; i++) {
-        lv_obj_t *k = glass_label(p, labels[i], &lv_font_montserrat_14, TEXT_DIM_OPA);
+        lv_obj_t *k = glass_caption(p, labels[i]);
         lv_obj_set_pos(k, 30, 78 + i * 62);
         snprintf(buf, sizeof(buf), "%s", nz(values[i], "--"));
         lv_obj_t *v = glass_label(p, buf, &lv_font_montserrat_20, LV_OPA_COVER);
@@ -1078,18 +1600,21 @@ static void build_pool_sheet(void)
         lv_qrcode_update(qr, url, strlen(url));
         lv_obj_center(qr);
     } else {
-        lv_obj_t *l = glass_label(qr_bg, "No IP yet", &lv_font_montserrat_16, LV_OPA_COVER);
-        lv_obj_set_style_text_color(l, lv_color_black(), 0);
+        /* Black on the white QR box, deliberately outside the material walk. */
+        lv_obj_t *l = lv_label_create(qr_bg);
+        lv_label_set_text(l, "No IP yet");
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(l, lv_color_hex(0x000000), 0);
         lv_obj_center(l);
     }
-    lv_obj_t *hint = glass_label(p, ip_ok ? "Scan to open AxeOS" : "Connect Wi-Fi for a setup QR",
-                                 &lv_font_montserrat_12, TEXT_DIM_OPA);
+    lv_obj_t *hint = glass_caption(p, ip_ok ? "Scan to open AxeOS" : "Connect Wi-Fi for a setup QR");
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
     lv_obj_set_width(hint, 200);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -18, 254);
     if (ip_ok) {
         lv_obj_t *ipl = glass_label(p, ip, &lv_font_montserrat_16, LV_OPA_COVER);
-        lv_obj_set_style_text_color(ipl, COLOR_ACCENT, 0);
+        lv_obj_set_user_data(ipl, MARK_ACCENT);
         lv_obj_set_width(ipl, 200);
         lv_obj_set_style_text_align(ipl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(ipl, LV_ALIGN_TOP_RIGHT, -18, 276);
@@ -1098,7 +1623,7 @@ static void build_pool_sheet(void)
 
 void glass_sheet_open(glass_sheet_t sheet)
 {
-    if (!s_screen) return;
+    if (!s_host) return;
     if (s_sheet != GLASS_SHEET_NONE) glass_sheet_close();
     if (s_drawer_open) glass_drawer_close();
     if (sheet == GLASS_SHEET_NONE) return;
@@ -1109,52 +1634,87 @@ void glass_sheet_open(glass_sheet_t sheet)
     case GLASS_SHEET_LAYOUT:    build_layout_sheet();    break;
     case GLASS_SHEET_WALLPAPER: build_wallpaper_sheet(); break;
     case GLASS_SHEET_POOL:      build_pool_sheet();      break;
+    case GLASS_SHEET_ICONS:     build_icons_sheet();     break;
     default: break;
     }
-    lv_obj_update_layout(s_screen);
-    frost_sync();
+    glass_screen_ready(s_host);
 }
 
-void glass_sheet_close(void)
+static void thumbs_free(void)
 {
-    if (s_sheet == GLASS_SHEET_NONE) return;
-    s_sheet = GLASS_SHEET_NONE;
-    if (s_sheet_panel) { unregister_frost(s_sheet_panel); lv_obj_del(s_sheet_panel); s_sheet_panel = NULL; }
-    if (s_sheet_scrim) { lv_obj_del(s_sheet_scrim); s_sheet_scrim = NULL; }
     for (int i = 0; i < 3; i++) {
         if (s_thumb_buf[i]) { free(s_thumb_buf[i]); s_thumb_buf[i] = NULL; }
     }
 }
 
-/* ---------------- screen ---------------- */
-
-void glass_home_create(void)
+static void sheet_reset(void)
 {
-    if (s_screen) return;
-    prefs_load();
+    s_sheet = GLASS_SHEET_NONE;
+    s_sheet_panel = NULL;
+    s_sheet_scrim = NULL;
+    s_sheet_host  = NULL;
+    thumbs_free();
+}
 
+void glass_sheet_close(void)
+{
+    if (s_sheet == GLASS_SHEET_NONE) return;
+    if (s_sheet_panel) { unregister_frost(s_sheet_panel); lv_obj_del(s_sheet_panel); }
+    if (s_sheet_scrim) lv_obj_del(s_sheet_scrim);
+    sheet_reset();
+}
+
+/* ---------------- screens ---------------- */
+
+lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
+{
+    prefs_load();
     if (!wallpaper_prepare(s_wall)) {
         ESP_LOGW(TAG, "wallpaper alloc failed; glass falls back to flat panes");
     }
 
-    s_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(s_screen, lv_color_hex(0x070B1F), 0);
-    lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(s_screen, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_add_event_cb(s_screen, drawer_toggle_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *scr = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(dim ? 0x000000 : 0x070B1F), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_event_cb(scr, drawer_toggle_cb, LV_EVENT_CLICKED, NULL);
+
+    s_host      = scr;
+    s_host_kind = kind;
+    s_host_dim  = dim;
+    s_host_wall = NULL;
 
     const lv_img_dsc_t *sharp = wallpaper_image(WALLPAPER_SHARP);
     if (sharp) {
-        s_wall_img = lv_img_create(s_screen);
-        lv_img_set_src(s_wall_img, sharp);
-        lv_obj_set_pos(s_wall_img, 0, 0);
-        lv_obj_clear_flag(s_wall_img, LV_OBJ_FLAG_CLICKABLE);
+        s_host_wall = lv_img_create(scr);
+        lv_img_set_src(s_host_wall, sharp);
+        lv_obj_set_pos(s_host_wall, 0, 0);
+        /* Night: the wallpaper is structure, not light. */
+        if (dim) lv_obj_set_style_img_opa(s_host_wall, LV_OPA_20, 0);
+        lv_obj_clear_flag(s_host_wall, LV_OBJ_FLAG_CLICKABLE);
     }
+    return scr;
+}
 
-    s_frost_count = 0;
+void glass_screen_detach(lv_obj_t *scr)
+{
+    if (!scr) return;
+    if (s_drawer_host == scr) drawer_reset();
+    if (s_sheet_host == scr)  sheet_reset();
+    frost_drop_host(scr);
+    if (s_host == scr) {
+        s_host = NULL;
+        s_host_wall = NULL;
+        s_host_dim = false;
+    }
+}
+
+void glass_home_create(void)
+{
+    if (s_screen) return;
+    s_screen = glass_screen_create(GLASS_SCREEN_HOME, false);
     build_grid();
-
     s_refresh = lv_timer_create(refresh_cb, 1000, NULL);
     ESP_LOGI(TAG, "glass home: layout=%d widgets=0x%03x wallpaper=%s",
              (int) s_layout, (unsigned) s_mask, wallpaper_name(s_wall));
@@ -1164,24 +1724,12 @@ void glass_home_destroy(void)
 {
     if (!s_screen) return;
     if (s_refresh) { lv_timer_del(s_refresh); s_refresh = NULL; }
-    if (s_drawer_sheet) lv_anim_del(s_drawer_sheet, drawer_anim_cb);
-    for (int i = 0; i < 3; i++) {
-        if (s_thumb_buf[i]) { free(s_thumb_buf[i]); s_thumb_buf[i] = NULL; }
-    }
+    glass_screen_detach(s_screen);
     lv_obj_del(s_screen);
     s_screen = NULL;
-    s_wall_img = NULL;
     s_grid = NULL;
-    s_drawer_scrim = NULL;
-    s_drawer_sheet = NULL;
-    s_sheet_scrim = NULL;
-    s_sheet_panel = NULL;
-    s_sheet = GLASS_SHEET_NONE;
-    s_drawer_open = false;
-    s_drawer_anim = false;
-    s_frost_count = 0;
     s_card_count = 0;
-    /* The wallpaper buffers stay allocated: the next visit to home would
+    /* The wallpaper buffers stay allocated: the next glass screen would
      * otherwise re-render both variants, and PSRAM has the room. */
 }
 

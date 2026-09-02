@@ -32,7 +32,7 @@ PRESETS = [
 ]
 SLOTS = [
     "background", "card", "accent", "red",
-    "text", "text dim", "on accent", "border", "nav",
+    "text", "text dim", "on accent", "border", "nav", "icon",
 ]
 SCREENS = ["home", "night", "block", "clock", "price", "mempool", "wifi", "settings"]
 

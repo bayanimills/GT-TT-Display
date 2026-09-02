@@ -7,6 +7,7 @@
 #include "price.h"
 #include "mempool.h"
 #include "custom_fonts.h"
+#include "glass.h"
 #include "esp_timer.h"
 #include "lwip/apps/sntp.h"
 #include <time.h>
@@ -34,19 +35,31 @@ void clock_screen_create(void)
         return;
     }
 
-    clock_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(clock_screen, COLOR_BACKGROUND, 0);
-    lv_obj_set_style_bg_opa(clock_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(clock_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(clock_screen, LV_SCROLLBAR_MODE_OFF);
+    const bool glass = glass_active();
+    lv_obj_t *parent;
+    if (glass)
+    {
+        clock_screen = glass_screen_create(GLASS_SCREEN_CLOCK, false);
+        parent = glass_pane(clock_screen, 720, 320, 28);
+        lv_obj_center(parent);
+    }
+    else
+    {
+        clock_screen = lv_obj_create(NULL);
+        lv_obj_set_style_bg_color(clock_screen, COLOR_BACKGROUND, 0);
+        lv_obj_set_style_bg_opa(clock_screen, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(clock_screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(clock_screen, LV_SCROLLBAR_MODE_OFF);
+        parent = clock_screen;
+    }
 
-    clock_title_label = lv_label_create(clock_screen);
+    clock_title_label = lv_label_create(parent);
     lv_label_set_text(clock_title_label, "CURRENT TIME");
     lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_20, 0);
     lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 30);
 
-    clock_time_cont = lv_obj_create(clock_screen);
+    clock_time_cont = lv_obj_create(parent);
     lv_obj_set_size(clock_time_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(clock_time_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(clock_time_cont, 0, 0);
@@ -54,7 +67,12 @@ void clock_screen_create(void)
     lv_obj_set_style_pad_column(clock_time_cont, 10, 0);
     lv_obj_set_flex_flow(clock_time_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(clock_time_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_align(clock_time_cont, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_align(clock_time_cont, LV_ALIGN_CENTER, 0, glass ? 10 : -10);
+    if (glass)
+    {
+        /* Let taps fall through to the screen so the drawer opens. */
+        lv_obj_clear_flag(clock_time_cont, LV_OBJ_FLAG_CLICKABLE);
+    }
 
     clock_time_label = lv_label_create(clock_time_cont);
     lv_label_set_text(clock_time_label, current_time_text);
@@ -67,6 +85,15 @@ void clock_screen_create(void)
     lv_obj_set_style_text_color(clock_ampm_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_opa(clock_ampm_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(clock_ampm_label, &lv_font_montserrat_48, 0);
+
+    if (glass)
+    {
+        clock_start_sntp();
+        clock_update_time_text();
+        clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
+        glass_screen_ready(clock_screen);
+        return;
+    }
 
     lv_obj_t *bottom_nav = lv_obj_create(clock_screen);
     lv_obj_set_size(bottom_nav, SCREEN_WIDTH, 64);
@@ -104,6 +131,7 @@ void clock_screen_destroy(void)
             lv_timer_del(clock_timer);
             clock_timer = NULL;
         }
+        glass_screen_detach(clock_screen);
         lv_obj_del(clock_screen);
         clock_screen = NULL;
         clock_time_cont = NULL;

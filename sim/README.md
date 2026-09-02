@@ -90,8 +90,8 @@ S <slot> <rrggbb>   override one palette slot
 C                   commit theme (persist + rebuild screen)
 K <skin>            select skin: 0 classic, 1 glass (home rebuilds)
 G <what> <value>    glass skin: layout 0|1, widgets <hexmask>, wall <index>,
-                    drawer 0|1, sheet 0..4 (widgets, layout, wallpaper, pool),
-                    scroll <px>
+                    drawer 0|1, sheet 0..5 (widgets, layout, wallpaper, pool,
+                    icons), scroll <px>
 N <screen>          home night block clock price mempool wifi settings
 R                   force repaint
 Q                   quit
@@ -110,6 +110,11 @@ python3 shot.py out --preset 0 --cmd "K 1" --cmd "G sheet 3" --name glass-wallpa
 python3 shot.py out --preset 0 --cmd "K 1" --touch 400,300 --touch 47,395   # tap to open the drawer, tap Widgets
 python3 shot.py out --preset 0 --cmd "K 1" --drag 400,400,400,120           # scroll the widget grid
 ```
+
+Every screen has a Glass form, so `--screen settings --cmd "K 1"` renders the
+glass settings and so on. `--online` lets price and mempool fetch for real
+through `curl` (pair it with `--settle 12`), and `SIM_DEBUG=1` in the
+environment lets the firmware log through to the terminal.
 
 Glass preferences persist to `sim_nvs.txt` like everything else, so delete it
 between runs if you want the defaults back.

@@ -8,6 +8,7 @@ idf_component_register(
         "assets/temperature_icon.c"
         "assets/fan.c"
         "assets/star.c"
+        "assets/glass_icons.c"
         "angelwish_96.c"
     INCLUDE_DIRS ".")
 

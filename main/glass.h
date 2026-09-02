@@ -5,13 +5,18 @@
 #include <stdbool.h>
 #include "lvgl.h"
 
-/* The Glass skin's home surface: a full-screen wallpaper with a user-chosen
- * set of frosted widgets, a tap-to-reveal bottom drawer for navigation, and
- * glass sheets for choosing widgets, layout and wallpaper.
+/* The Glass skin.
  *
- * home.c hands off to these when theme_get_skin() == THEME_SKIN_GLASS, so
- * every other screen keeps calling home_screen_create() / home_get_screen()
- * exactly as before. */
+ * Two layers live here. The home surface: a full-screen wallpaper with a
+ * user-chosen set of frosted widgets, sheets for choosing widgets, layout and
+ * wallpaper. And the chrome every other screen borrows under Glass: a
+ * wallpapered screen, frosted panes, the tap-to-reveal bottom drawer that
+ * replaces the classic nav bar, and widget styling that stays legible over a
+ * wallpaper.
+ *
+ * home.c hands off to glass_home_create() when theme_get_skin() is Glass; the
+ * other screens branch on glass_active() inside their own create functions and
+ * keep their labels and update paths, so data flow is identical in both skins. */
 
 typedef enum {
     GLASS_WIDGET_HASHRATE = 0,
@@ -40,8 +45,23 @@ typedef enum {
     GLASS_SHEET_LAYOUT,
     GLASS_SHEET_WALLPAPER,
     GLASS_SHEET_POOL,
+    GLASS_SHEET_ICONS,
 } glass_sheet_t;
 
+/* Which screen a glass screen is, for the drawer's highlight and navigation. */
+typedef enum {
+    GLASS_SCREEN_HOME = 0,
+    GLASS_SCREEN_BLOCK,
+    GLASS_SCREEN_MEMPOOL,
+    GLASS_SCREEN_CLOCK,
+    GLASS_SCREEN_PRICE,
+    GLASS_SCREEN_WIFI,
+    GLASS_SCREEN_SETTINGS,
+    GLASS_SCREEN_NIGHT,
+    GLASS_SCREEN_COUNT
+} glass_screen_t;
+
+/* ---- home surface ---- */
 void      glass_home_create(void);
 void      glass_home_destroy(void);
 lv_obj_t *glass_home_get_screen(void);
@@ -57,7 +77,50 @@ int            glass_get_wallpaper(void);
 void           glass_set_wallpaper(int index);
 const char    *glass_widget_name(glass_widget_t id);
 
-/* Drawer and sheets, exposed so the simulator can drive them directly. */
+/* ---- chrome for the other screens ---- */
+
+/* True when the Glass skin is selected. */
+bool glass_active(void);
+
+/* A screen with the wallpaper behind it and the drawer one tap away. `dim`
+ * is for the night screen: wallpaper at a fifth of its brightness over black,
+ * and panes made on it are dark slabs rather than bright frost. */
+lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim);
+
+/* Must run before a glass screen is deleted: closes the drawer or sheet if it
+ * lives there and forgets its panes. Safe to call on a classic screen. */
+void glass_screen_detach(lv_obj_t *scr);
+
+/* A frosted pane: wallpaper crop, tint, specular edge, border, shadow. Taps on
+ * it fall through to the screen, so the drawer opens from anywhere. */
+lv_obj_t *glass_pane(lv_obj_t *parent, int w, int h, int radius);
+
+/* Make taps on a scrollable container (which must stay clickable to scroll)
+ * open the drawer like taps on the screen do. */
+void glass_attach_drawer_toggle(lv_obj_t *obj);
+
+/* Keep pane crops aimed while `obj` scrolls (panes are children of it). */
+void glass_track_scroll(lv_obj_t *obj);
+
+/* Call once a glass screen's panes are built: lays out, aims every crop and
+ * derives each pane's material from the wallpaper under it. */
+void glass_screen_ready(lv_obj_t *scr);
+
+/* Give a label that sits straight on the wallpaper (not on a pane) a small
+ * dark pill so it always has a substrate; `accent` tints it with the vibrant
+ * accent instead of white. */
+void glass_pill_label(lv_obj_t *label, bool accent);
+
+/* Restyle stock widgets for the material. */
+void glass_style_button(lv_obj_t *btn, bool filled);
+void glass_style_dropdown(lv_obj_t *dd);
+void glass_style_slider(lv_obj_t *slider);
+void glass_style_textarea(lv_obj_t *ta);
+void glass_style_keyboard(lv_obj_t *kb);
+void glass_style_checkbox(lv_obj_t *cb);
+void glass_style_bar(lv_obj_t *bar);
+
+/* ---- drawer and sheets (also driven by the simulator) ---- */
 void glass_drawer_open(void);
 void glass_drawer_close(void);
 bool glass_drawer_is_open(void);

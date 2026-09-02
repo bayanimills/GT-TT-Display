@@ -81,10 +81,15 @@ def write_png(path, rgb565):
 
 
 class Sim:
-    def __init__(self, binary="./gtsim"):
+    def __init__(self, binary="./gtsim", online=False):
+        # sim_rt.c treats the mere presence of SIM_OFFLINE as offline.
         env = dict(os.environ, SIM_OFFLINE="1")
+        if online:
+            env.pop("SIM_OFFLINE", None)
+        # SIM_DEBUG=1 lets the firmware's log through to the terminal.
+        stderr = None if os.environ.get("SIM_DEBUG") else subprocess.DEVNULL
         self.p = subprocess.Popen([binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.DEVNULL, env=env)
+                                  stderr=stderr, env=env)
         self.buf = b""
 
     def send(self, line):
@@ -116,10 +121,25 @@ class Sim:
                         idx = self.buf.find(b"GTFB", 1)
                         self.buf = self.buf[idx:] if idx > 0 else b""
                         continue
+                    self.last_no = struct.unpack("<I", self.buf[4:8])[0]
                     last = self.buf[12:FRAME]
                     self.buf = self.buf[FRAME:]
         self.last = last
         return last
+
+    def fresh_frame(self, timeout=4.0):
+        """Force a repaint and return the first frame emitted after it.
+
+        The frame header carries a sequence number, so this cannot hand back a
+        frame that predates the commands just sent, whatever the pipe timing."""
+        seen = getattr(self, "last_no", 0)
+        self.send("R")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            frame = self.latest_frame(settle=0.3)
+            if getattr(self, "last_no", 0) > seen and frame is not None:
+                return frame
+        return self.last
 
     def close(self):
         try:
@@ -141,6 +161,10 @@ def main():
                     help="output file name (without .png); default <screen>-<NN>-<preset>")
     ap.add_argument("--touch", action="append", default=[],
                     help="tap at 'x,y' after the commands (repeatable); each tap is a press then release")
+    ap.add_argument("--online", action="store_true",
+                    help="let price/mempool fetch for real through curl instead of SIM_OFFLINE")
+    ap.add_argument("--settle", type=float, default=1.0,
+                    help="seconds to wait before the final frame (raise for --online)")
     ap.add_argument("--drag", action="append", default=[],
                     help="drag 'x1,y1,x2,y2' after the taps (repeatable); a press, a swept move, a release")
     args = ap.parse_args()
@@ -148,7 +172,7 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     presets = [args.preset] if args.preset is not None else range(len(PRESETS))
 
-    sim = Sim(args.binary)
+    sim = Sim(args.binary, online=args.online)
     try:
         sim.latest_frame(settle=5.5)          # let the boot screen finish
         for line in WARMUP:
@@ -184,7 +208,8 @@ def main():
                     sim.latest_frame(settle=0.04)
                 sim.send("T %d %d 0" % (x2, y2))
                 sim.latest_frame(settle=0.8)
-            frame = sim.latest_frame(settle=1.0)
+            sim.latest_frame(settle=args.settle)
+            frame = sim.fresh_frame()
             if frame is None:
                 print("no frame for preset %d" % i, file=sys.stderr)
                 continue

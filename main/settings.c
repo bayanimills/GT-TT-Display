@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "home.h"
+#include "glass.h"
 #include "wifi.h"
 #include "night.h"
 #include "block.h"
@@ -101,6 +102,11 @@ static lv_obj_t *create_settings_button(lv_obj_t *parent, const char *text, lv_e
     if (event_cb)
     {
         lv_obj_add_event_cb(btn, event_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    if (glass_active())
+    {
+        glass_style_button(btn, active);
     }
 
     return btn;
@@ -343,16 +349,22 @@ static void create_system_overlay(void)
     lv_obj_clear_flag(sys_overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(sys_overlay, cleanup_system_overlay, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *dialog = lv_obj_create(sys_overlay);
-    lv_obj_set_size(dialog, 400, 200);
-    lv_obj_center(dialog);
-    lv_obj_set_style_bg_color(dialog, COLOR_CARD_BG, 0);
-    lv_obj_set_style_bg_opa(dialog, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(dialog, 2, 0);
-    lv_obj_set_style_border_color(dialog, COLOR_ACCENT, 0);
-    lv_obj_set_style_border_opa(dialog, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(dialog, 14, 0);
-    lv_obj_clear_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *dialog;
+    if (glass_active()) {
+        dialog = glass_pane(sys_overlay, 400, 200, 24);
+        lv_obj_center(dialog);
+    } else {
+        dialog = lv_obj_create(sys_overlay);
+        lv_obj_set_size(dialog, 400, 200);
+        lv_obj_center(dialog);
+        lv_obj_set_style_bg_color(dialog, COLOR_CARD_BG, 0);
+        lv_obj_set_style_bg_opa(dialog, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(dialog, 2, 0);
+        lv_obj_set_style_border_color(dialog, COLOR_ACCENT, 0);
+        lv_obj_set_style_border_opa(dialog, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(dialog, 14, 0);
+        lv_obj_clear_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
+    }
 
     char display_buffer[64];
     decode_sys_info(display_buffer, sizeof(display_buffer));
@@ -362,6 +374,9 @@ static void create_system_overlay(void)
     lv_obj_set_style_text_color(label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(label, &lv_font_montserrat_22, 0);
     lv_obj_center(label);
+    if (glass_active()) {
+        glass_screen_ready(lv_scr_act());
+    }
 }
 
 static void settings_diagnostics_handler(lv_event_t *e)
@@ -548,32 +563,62 @@ void settings_screen_create(void)
 
     settings_load_timezone();
 
-    settings_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(settings_screen, COLOR_BACKGROUND, 0);
-    lv_obj_set_style_bg_opa(settings_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(settings_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(settings_screen, LV_SCROLLBAR_MODE_OFF);
+    const bool glass = glass_active();
+    lv_obj_t *main_cont;
+    if (glass)
+    {
+        /* One pane fills the surface. The pane itself never scrolls (its crop
+         * would drift); a transparent container inside it does. */
+        settings_screen = glass_screen_create(GLASS_SCREEN_SETTINGS, false);
+        lv_obj_t *pane = glass_pane(settings_screen, SCREEN_WIDTH - 48, SCREEN_HEIGHT - 44, 28);
+        lv_obj_align(pane, LV_ALIGN_TOP_MID, 0, 22);
+        main_cont = lv_obj_create(pane);
+        lv_obj_set_size(main_cont, SCREEN_WIDTH - 48, SCREEN_HEIGHT - 44);
+        lv_obj_set_pos(main_cont, 0, 0);
+        lv_obj_set_style_bg_opa(main_cont, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(main_cont, 0, 0);
+        lv_obj_set_style_radius(main_cont, 28, 0);
+        lv_obj_set_style_pad_all(main_cont, 16, 0);
+        lv_obj_add_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_set_scroll_dir(main_cont, LV_DIR_VER);
+        lv_obj_set_style_pad_bottom(main_cont, 80, 0);
+        glass_attach_drawer_toggle(main_cont);
+    }
+    else
+    {
+        settings_screen = lv_obj_create(NULL);
+        lv_obj_set_style_bg_color(settings_screen, COLOR_BACKGROUND, 0);
+        lv_obj_set_style_bg_opa(settings_screen, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(settings_screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(settings_screen, LV_SCROLLBAR_MODE_OFF);
 
-    lv_obj_t *main_cont = lv_obj_create(settings_screen);
-    lv_obj_set_size(main_cont, SCREEN_WIDTH - 60, SCREEN_HEIGHT - 100);
-    lv_obj_align(main_cont, LV_ALIGN_TOP_MID, 0, 16);
-    lv_obj_set_style_bg_color(main_cont, COLOR_CARD_BG, 0);
-    lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(main_cont, 1, 0);
-    lv_obj_set_style_border_color(main_cont, COLOR_BORDER, 0);
-    lv_obj_set_style_border_opa(main_cont, LV_OPA_50, 0);
-    lv_obj_set_style_radius(main_cont, 14, 0);
-    lv_obj_set_style_pad_all(main_cont, 16, 0);
-    lv_obj_add_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_set_scroll_dir(main_cont, LV_DIR_VER);
-    lv_obj_set_style_pad_bottom(main_cont, 80, 0);
+        main_cont = lv_obj_create(settings_screen);
+        lv_obj_set_size(main_cont, SCREEN_WIDTH - 60, SCREEN_HEIGHT - 100);
+        lv_obj_align(main_cont, LV_ALIGN_TOP_MID, 0, 16);
+        lv_obj_set_style_bg_color(main_cont, COLOR_CARD_BG, 0);
+        lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(main_cont, 1, 0);
+        lv_obj_set_style_border_color(main_cont, COLOR_BORDER, 0);
+        lv_obj_set_style_border_opa(main_cont, LV_OPA_50, 0);
+        lv_obj_set_style_radius(main_cont, 14, 0);
+        lv_obj_set_style_pad_all(main_cont, 16, 0);
+        lv_obj_add_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_set_scroll_dir(main_cont, LV_DIR_VER);
+        lv_obj_set_style_pad_bottom(main_cont, 80, 0);
+    }
 
     lv_obj_t *title_label = lv_label_create(main_cont);
     lv_label_set_text(title_label, "SETTINGS");
     lv_obj_set_style_text_color(title_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_28, 0);
     lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 6);
+    if (glass)
+    {
+        lv_obj_add_flag(title_label, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(title_label, settings_diagnostics_handler, LV_EVENT_CLICKED, NULL);
+    }
 
     lv_obj_t *perf_section = lv_obj_create(main_cont);
     lv_obj_set_size(perf_section, 680, 110);
@@ -582,6 +627,7 @@ void settings_screen_create(void)
     lv_obj_set_style_border_width(perf_section, 0, 0);
     lv_obj_set_style_pad_all(perf_section, 10, 0);
     lv_obj_clear_flag(perf_section, LV_OBJ_FLAG_SCROLLABLE);
+    if (glass) lv_obj_clear_flag(perf_section, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *perf_title = lv_label_create(perf_section);
     lv_label_set_text(perf_title, "Performance Mode:");
@@ -595,6 +641,7 @@ void settings_screen_create(void)
     lv_obj_set_style_bg_opa(perf_btn_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(perf_btn_cont, 0, 0);
     lv_obj_set_style_pad_all(perf_btn_cont, 0, 0);
+    if (glass) lv_obj_clear_flag(perf_btn_cont, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_flex_flow(perf_btn_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(perf_btn_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -612,6 +659,7 @@ void settings_screen_create(void)
     lv_obj_set_style_border_width(fan_section, 0, 0);
     lv_obj_set_style_pad_all(fan_section, 10, 0);
     lv_obj_clear_flag(fan_section, LV_OBJ_FLAG_SCROLLABLE);
+    if (glass) lv_obj_clear_flag(fan_section, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *fan_title = lv_label_create(fan_section);
     lv_label_set_text(fan_title, "Fan Control:");
@@ -625,6 +673,7 @@ void settings_screen_create(void)
     lv_obj_set_style_text_font(auto_fan_checkbox, &lv_font_montserrat_16, 0);
     lv_obj_align(auto_fan_checkbox, LV_ALIGN_TOP_LEFT, 0, 35);
     lv_obj_add_event_cb(auto_fan_checkbox, settings_auto_fan_toggled, LV_EVENT_VALUE_CHANGED, NULL);
+    if (glass) glass_style_checkbox(auto_fan_checkbox);
 
     if (current_settings.auto_fan_control)
     {
@@ -640,6 +689,7 @@ void settings_screen_create(void)
     lv_obj_set_style_bg_color(fan_slider, COLOR_ACCENT, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(fan_slider, COLOR_ACCENT, LV_PART_KNOB);
     lv_obj_add_event_cb(fan_slider, settings_fan_slider_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    if (glass) glass_style_slider(fan_slider);
 
     fan_value_label = lv_label_create(fan_section);
     char fan_text[16];
@@ -662,6 +712,7 @@ void settings_screen_create(void)
     lv_obj_set_style_border_width(brightness_section, 0, 0);
     lv_obj_set_style_pad_all(brightness_section, 10, 0);
     lv_obj_clear_flag(brightness_section, LV_OBJ_FLAG_SCROLLABLE);
+    if (glass) lv_obj_clear_flag(brightness_section, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *brightness_title = lv_label_create(brightness_section);
     lv_label_set_text(brightness_title, "Screen Brightness:");
@@ -678,6 +729,7 @@ void settings_screen_create(void)
     lv_obj_set_style_bg_color(brightness_slider, COLOR_ACCENT, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(brightness_slider, COLOR_ACCENT, LV_PART_KNOB);
     lv_obj_add_event_cb(brightness_slider, settings_brightness_slider_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    if (glass) glass_style_slider(brightness_slider);
 
     brightness_value_label = lv_label_create(brightness_section);
     char brightness_text[16];
@@ -694,6 +746,7 @@ void settings_screen_create(void)
     lv_obj_set_style_border_width(theme_section, 0, 0);
     lv_obj_set_style_pad_all(theme_section, 10, 0);
     lv_obj_clear_flag(theme_section, LV_OBJ_FLAG_SCROLLABLE);
+    if (glass) lv_obj_clear_flag(theme_section, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *theme_title = lv_label_create(theme_section);
     lv_label_set_text(theme_title, "Colour Theme:");
@@ -715,6 +768,7 @@ void settings_screen_create(void)
     lv_obj_set_style_text_color(theme_dropdown, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(theme_dropdown, &lv_font_montserrat_16, 0);
     lv_obj_add_event_cb(theme_dropdown, settings_theme_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    if (glass) glass_style_dropdown(theme_dropdown);
 
     /* Skin sits beside the palette: the two are independent axes of a theme,
      * so any palette can be paired with either skin. */
@@ -738,6 +792,7 @@ void settings_screen_create(void)
     lv_obj_set_style_text_color(skin_dropdown, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(skin_dropdown, &lv_font_montserrat_16, 0);
     lv_obj_add_event_cb(skin_dropdown, settings_skin_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    if (glass) glass_style_dropdown(skin_dropdown);
 
     /* Swatch strip: the live palette, so the effect of a preset is visible
      * before scrolling the rest of the UI. */
@@ -765,6 +820,7 @@ void settings_screen_create(void)
     lv_obj_set_style_border_width(timezone_section, 0, 0);
     lv_obj_set_style_pad_all(timezone_section, 10, 0);
     lv_obj_clear_flag(timezone_section, LV_OBJ_FLAG_SCROLLABLE);
+    if (glass) lv_obj_clear_flag(timezone_section, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *timezone_title = lv_label_create(timezone_section);
     lv_label_set_text(timezone_title, "Time Zone:");
@@ -786,6 +842,7 @@ void settings_screen_create(void)
     lv_obj_set_style_text_color(timezone_dropdown, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(timezone_dropdown, &lv_font_montserrat_16, 0);
     lv_obj_add_event_cb(timezone_dropdown, settings_timezone_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    if (glass) glass_style_dropdown(timezone_dropdown);
 
     if (!timezone_applied)
     {
@@ -800,6 +857,7 @@ void settings_screen_create(void)
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
     lv_obj_clear_flag(ota_section, LV_OBJ_FLAG_SCROLLABLE);
+    if (glass) lv_obj_clear_flag(ota_section, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *ota_title = lv_label_create(ota_section);
     lv_label_set_text(ota_title, "Firmware Update:");
@@ -829,6 +887,7 @@ void settings_screen_create(void)
     lv_obj_set_style_bg_color(ota_progress_bar, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(ota_progress_bar, COLOR_ACCENT, LV_PART_INDICATOR);
     lv_obj_set_style_radius(ota_progress_bar, 8, 0);
+    if (glass) glass_style_bar(ota_progress_bar);
 
     ota_update_btn = create_settings_button(ota_section, "CHECK FOR UPDATES", settings_ota_update_clicked, false);
     lv_obj_set_size(ota_update_btn, 240, 36);
@@ -836,6 +895,12 @@ void settings_screen_create(void)
 
     // Create OTA update timer (500ms interval)
     ota_timer = lv_timer_create(ota_update_timer_cb, 500, NULL);
+
+    if (glass)
+    {
+        glass_screen_ready(settings_screen);
+        return;
+    }
 
     lv_obj_t *bottom_nav = lv_obj_create(settings_screen);
     lv_obj_set_size(bottom_nav, SCREEN_WIDTH, 64);
@@ -877,6 +942,7 @@ void settings_screen_destroy(void)
 
     if (settings_screen)
     {
+        glass_screen_detach(settings_screen);
         lv_obj_del(settings_screen);
         settings_screen = NULL;
         performance_low_btn = NULL;

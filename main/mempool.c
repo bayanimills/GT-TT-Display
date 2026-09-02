@@ -1,5 +1,6 @@
 #include "mempool.h"
 #include "custom_fonts.h"
+#include "glass.h"
 #include "home.h"
 #include "block.h"
 #include "clock.h"
@@ -115,11 +116,19 @@ void mempool_screen_create(void)
         mempool_log_tuned = true;
     }
 
-    mempool_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(mempool_screen, COLOR_BACKGROUND, 0);
-    lv_obj_set_style_bg_opa(mempool_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(mempool_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(mempool_screen, LV_SCROLLBAR_MODE_OFF);
+    const bool glass = glass_active();
+    if (glass)
+    {
+        mempool_screen = glass_screen_create(GLASS_SCREEN_MEMPOOL, false);
+    }
+    else
+    {
+        mempool_screen = lv_obj_create(NULL);
+        lv_obj_set_style_bg_color(mempool_screen, COLOR_BACKGROUND, 0);
+        lv_obj_set_style_bg_opa(mempool_screen, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(mempool_screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(mempool_screen, LV_SCROLLBAR_MODE_OFF);
+    }
 
     lv_obj_t *title = lv_label_create(mempool_screen);
     lv_label_set_text(title, "LATEST BLOCKS");
@@ -136,7 +145,7 @@ void mempool_screen_create(void)
 
     mempool_row = lv_obj_create(mempool_screen);
     const int row_y = 76;
-    const int nav_h = 64;
+    const int nav_h = glass ? 0 : 64;
     const int row_bottom_gap = 16;
     int row_h = SCREEN_HEIGHT - row_y - nav_h - row_bottom_gap;
     if (row_h < 300)
@@ -156,6 +165,18 @@ void mempool_screen_create(void)
     lv_obj_set_scrollbar_mode(mempool_row, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_flex_flow(mempool_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(mempool_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    if (glass)
+    {
+        /* The row scrolls sideways, so its panes must keep their crops aimed,
+         * and a tap on it (not a drag) should open the drawer. */
+        glass_track_scroll(mempool_row);
+        glass_attach_drawer_toggle(mempool_row);
+        mempool_rebuild_cards();
+        mempool_ensure_task();
+        glass_screen_ready(mempool_screen);
+        return;
+    }
 
     lv_obj_t *bottom_nav = lv_obj_create(mempool_screen);
     lv_obj_set_size(bottom_nav, SCREEN_WIDTH, 64);
@@ -191,6 +212,7 @@ void mempool_screen_destroy(void)
 {
     if (mempool_screen)
     {
+        glass_screen_detach(mempool_screen);
         lv_obj_del(mempool_screen);
         mempool_screen = NULL;
         mempool_status_label = NULL;
@@ -501,6 +523,8 @@ static void mempool_rebuild_cards(void)
         return;
     }
 
+    const bool glass = glass_active();
+
     const lv_color_t color_height = lv_color_hex(0x00E5FF);
     const lv_color_t color_card = lv_color_hex(0x0B1E3A);
     const lv_color_t color_mid = lv_color_hex(0x1E5BFF);
@@ -531,6 +555,10 @@ static void mempool_rebuild_cards(void)
         lv_obj_set_style_border_width(card_wrap, 0, 0);
         lv_obj_set_style_pad_all(card_wrap, 0, 0);
         lv_obj_clear_flag(card_wrap, LV_OBJ_FLAG_SCROLLABLE);
+        if (glass)
+        {
+            lv_obj_clear_flag(card_wrap, LV_OBJ_FLAG_CLICKABLE);
+        }
 
         char height_txt[16];
         lv_snprintf(height_txt, sizeof(height_txt), "%lld", b->height);
@@ -539,29 +567,43 @@ static void mempool_rebuild_cards(void)
         lv_obj_set_style_text_color(height_label, color_height, 0);
         lv_obj_set_style_text_font(height_label, &lv_font_montserrat_24, 0);
         lv_obj_align(height_label, LV_ALIGN_TOP_MID, 0, 0);
+        if (glass)
+        {
+            /* Sits on the wallpaper, not on the card, so it gets its own pill. */
+            glass_pill_label(height_label, true);
+        }
 
-        lv_obj_t *card = lv_obj_create(card_wrap);
-        lv_obj_set_size(card, CARD_W, card_h);
-        lv_obj_align(card, LV_ALIGN_TOP_MID, 0, wrap_top_offset);
-        lv_obj_set_style_radius(card, 8, 0);
-        lv_obj_set_style_border_width(card, 0, 0);
-        lv_obj_set_style_pad_all(card, 0, 0);
-        lv_obj_set_style_bg_color(card, color_card, 0);
-        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-        lv_obj_set_style_clip_corner(card, true, 0);
-        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *card;
+        if (glass)
+        {
+            card = glass_pane(card_wrap, CARD_W, card_h, 20);
+            lv_obj_align(card, LV_ALIGN_TOP_MID, 0, wrap_top_offset);
+        }
+        else
+        {
+            card = lv_obj_create(card_wrap);
+            lv_obj_set_size(card, CARD_W, card_h);
+            lv_obj_align(card, LV_ALIGN_TOP_MID, 0, wrap_top_offset);
+            lv_obj_set_style_radius(card, 8, 0);
+            lv_obj_set_style_border_width(card, 0, 0);
+            lv_obj_set_style_pad_all(card, 0, 0);
+            lv_obj_set_style_bg_color(card, color_card, 0);
+            lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+            lv_obj_set_style_clip_corner(card, true, 0);
+            lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
-        lv_obj_t *mid = lv_obj_create(card);
-        lv_obj_set_size(mid, CARD_W, card_h);
-        lv_obj_align(mid, LV_ALIGN_TOP_MID, 0, 0);
-        lv_obj_set_style_radius(mid, 8, 0);
-        lv_obj_set_style_bg_color(mid, color_mid, 0);
-        lv_obj_set_style_bg_grad_color(mid, color_bottom, 0);
-        lv_obj_set_style_bg_grad_dir(mid, LV_GRAD_DIR_VER, 0);
-        lv_obj_set_style_bg_opa(mid, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(mid, 0, 0);
-        lv_obj_set_style_pad_all(mid, 0, 0);
-        lv_obj_clear_flag(mid, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_t *mid = lv_obj_create(card);
+            lv_obj_set_size(mid, CARD_W, card_h);
+            lv_obj_align(mid, LV_ALIGN_TOP_MID, 0, 0);
+            lv_obj_set_style_radius(mid, 8, 0);
+            lv_obj_set_style_bg_color(mid, color_mid, 0);
+            lv_obj_set_style_bg_grad_color(mid, color_bottom, 0);
+            lv_obj_set_style_bg_grad_dir(mid, LV_GRAD_DIR_VER, 0);
+            lv_obj_set_style_bg_opa(mid, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(mid, 0, 0);
+            lv_obj_set_style_pad_all(mid, 0, 0);
+            lv_obj_clear_flag(mid, LV_OBJ_FLAG_SCROLLABLE);
+        }
 
         const int bottom_bar_h = 52;
         int content_h = card_h - bottom_bar_h;
@@ -595,7 +637,7 @@ static void mempool_rebuild_cards(void)
         lv_snprintf(range_txt, sizeof(range_txt), "%s - %s sat/vB", fee_min_txt, fee_max_txt);
         lv_obj_t *range_label = lv_label_create(card);
         lv_label_set_text(range_label, range_txt);
-        lv_obj_set_style_text_color(range_label, color_fee, 0);
+        lv_obj_set_style_text_color(range_label, glass ? COLOR_TEXT_SECONDARY : color_fee, 0);
         lv_obj_set_style_text_font(range_label, &lv_font_montserrat_14, 0);
         lv_obj_align(range_label, LV_ALIGN_TOP_MID, 0, range_y);
 
@@ -619,8 +661,12 @@ static void mempool_rebuild_cards(void)
         lv_obj_set_size(bottom_bar, CARD_W, bottom_bar_h);
         lv_obj_align(bottom_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
         lv_obj_set_style_radius(bottom_bar, 0, 0);
-        lv_obj_set_style_bg_color(bottom_bar, color_bottom, 0);
-        lv_obj_set_style_bg_opa(bottom_bar, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(bottom_bar, glass ? lv_color_white() : color_bottom, 0);
+        lv_obj_set_style_bg_opa(bottom_bar, glass ? LV_OPA_20 : LV_OPA_COVER, 0);
+        if (glass)
+        {
+            lv_obj_clear_flag(bottom_bar, LV_OBJ_FLAG_CLICKABLE);
+        }
         lv_obj_set_style_border_width(bottom_bar, 0, 0);
         lv_obj_set_style_pad_all(bottom_bar, 0, 0);
         lv_obj_clear_flag(bottom_bar, LV_OBJ_FLAG_SCROLLABLE);
@@ -650,7 +696,16 @@ static void mempool_rebuild_cards(void)
             lv_obj_set_style_text_font(pool_label, &lv_font_montserrat_14, 0);
             lv_obj_set_style_text_align(pool_label, LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_align(pool_label, LV_ALIGN_BOTTOM_MID, 0, -wrap_bottom_pad);
+            if (glass)
+            {
+                glass_pill_label(pool_label, false);
+            }
         }
+    }
+
+    if (glass)
+    {
+        glass_screen_ready(mempool_screen);
     }
 }
 

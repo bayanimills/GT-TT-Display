@@ -6,6 +6,7 @@
 #include "clock.h"
 #include "price.h"
 #include "mempool.h"
+#include "glass.h"
 #include "custom_fonts.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,26 +28,47 @@ void block_screen_create(void)
         return;
     }
 
-    block_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(block_screen, COLOR_BACKGROUND, 0);
-    lv_obj_set_style_bg_opa(block_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(block_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(block_screen, LV_SCROLLBAR_MODE_OFF);
+    /* Under Glass the figure sits on one pane over the wallpaper and the
+     * drawer replaces the nav bar; the labels are the same either way. */
+    const bool glass = glass_active();
+    lv_obj_t *parent;
+    if (glass)
+    {
+        block_screen = glass_screen_create(GLASS_SCREEN_BLOCK, false);
+        parent = glass_pane(block_screen, 720, 320, 28);
+        lv_obj_center(parent);
+    }
+    else
+    {
+        block_screen = lv_obj_create(NULL);
+        lv_obj_set_style_bg_color(block_screen, COLOR_BACKGROUND, 0);
+        lv_obj_set_style_bg_opa(block_screen, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(block_screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(block_screen, LV_SCROLLBAR_MODE_OFF);
+        parent = block_screen;
+    }
 
-    block_title_label = lv_label_create(block_screen);
+    block_title_label = lv_label_create(parent);
     lv_label_set_text(block_title_label, "CURRENT BLOCK HEIGHT");
     lv_obj_set_style_text_color(block_title_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(block_title_label, &lv_font_montserrat_20, 0);
     lv_obj_align(block_title_label, LV_ALIGN_TOP_MID, 0, 30);
 
-    block_height_label = lv_label_create(block_screen);
+    block_height_label = lv_label_create(parent);
     lv_label_set_text(block_height_label, current_block_height_text);
     lv_obj_set_style_text_color(block_height_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(block_height_label, &montserrat_140, 0);
     lv_obj_set_style_text_letter_space(block_height_label, 15, 0);
     lv_obj_set_style_text_align(block_height_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(block_height_label, SCREEN_WIDTH - 40);
-    lv_obj_align(block_height_label, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_set_width(block_height_label, glass ? 680 : SCREEN_WIDTH - 40);
+    lv_obj_align(block_height_label, LV_ALIGN_CENTER, 0, glass ? 10 : -10);
+
+    if (glass)
+    {
+        apply_cached_block_height();
+        glass_screen_ready(block_screen);
+        return;
+    }
 
     lv_obj_t *bottom_nav = lv_obj_create(block_screen);
     lv_obj_set_size(bottom_nav, SCREEN_WIDTH, 64);
@@ -77,6 +99,7 @@ void block_screen_destroy(void)
 {
     if (block_screen)
     {
+        glass_screen_detach(block_screen);
         lv_obj_del(block_screen);
         block_screen = NULL;
         block_height_label = NULL;

@@ -7,6 +7,7 @@
 #include "settings.h"
 #include "night.h"
 #include "custom_fonts.h"
+#include "glass.h"
 #include "lvgl_port.h"
 #include "esp_event.h"
 #include "esp_http_client.h"
@@ -80,26 +81,38 @@ void price_screen_create(void)
         return;
     }
 
-    price_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(price_screen, COLOR_BACKGROUND, 0);
-    lv_obj_set_style_bg_opa(price_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(price_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(price_screen, LV_SCROLLBAR_MODE_OFF);
+    const bool glass = glass_active();
+    lv_obj_t *parent;
+    if (glass)
+    {
+        price_screen = glass_screen_create(GLASS_SCREEN_PRICE, false);
+        parent = glass_pane(price_screen, 720, 320, 28);
+        lv_obj_center(parent);
+    }
+    else
+    {
+        price_screen = lv_obj_create(NULL);
+        lv_obj_set_style_bg_color(price_screen, COLOR_BACKGROUND, 0);
+        lv_obj_set_style_bg_opa(price_screen, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(price_screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(price_screen, LV_SCROLLBAR_MODE_OFF);
+        parent = price_screen;
+    }
 
-    price_title_label = lv_label_create(price_screen);
+    price_title_label = lv_label_create(parent);
     lv_label_set_text(price_title_label, "BTC PRICE (USD)");
     lv_obj_set_style_text_color(price_title_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(price_title_label, &lv_font_montserrat_20, 0);
     lv_obj_align(price_title_label, LV_ALIGN_TOP_MID, 0, 30);
 
-    price_status_label = lv_label_create(price_screen);
+    price_status_label = lv_label_create(parent);
     lv_label_set_text(price_status_label, current_price_status);
     lv_obj_set_style_text_color(price_status_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_opa(price_status_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(price_status_label, &lv_font_montserrat_16, 0);
     lv_obj_align(price_status_label, LV_ALIGN_TOP_MID, 0, 58);
 
-    price_value_cont = lv_obj_create(price_screen);
+    price_value_cont = lv_obj_create(parent);
     lv_obj_set_size(price_value_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(price_value_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(price_value_cont, 0, 0);
@@ -107,7 +120,11 @@ void price_screen_create(void)
     lv_obj_set_style_pad_column(price_value_cont, 10, 0);
     lv_obj_set_flex_flow(price_value_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(price_value_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_align(price_value_cont, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_align(price_value_cont, LV_ALIGN_CENTER, 0, glass ? 14 : -10);
+    if (glass)
+    {
+        lv_obj_clear_flag(price_value_cont, LV_OBJ_FLAG_CLICKABLE);
+    }
 
     price_prefix_label = lv_label_create(price_value_cont);
     lv_label_set_text(price_prefix_label, "$");
@@ -126,6 +143,16 @@ void price_screen_create(void)
     lv_obj_set_style_text_color(price_suffix_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_opa(price_suffix_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(price_suffix_label, &lv_font_montserrat_48, 0);
+
+    if (glass)
+    {
+        apply_cached_price();
+        /* One fetch loop for both skins and the home widget: started here or
+         * by price_ensure_task(), never twice. */
+        price_ensure_task();
+        glass_screen_ready(price_screen);
+        return;
+    }
 
     lv_obj_t *bottom_nav = lv_obj_create(price_screen);
     lv_obj_set_size(bottom_nav, SCREEN_WIDTH, 64);
@@ -161,6 +188,7 @@ void price_screen_destroy(void)
 {
     if (price_screen)
     {
+        glass_screen_detach(price_screen);
         lv_obj_del(price_screen);
         price_screen = NULL;
         price_value_cont = NULL;

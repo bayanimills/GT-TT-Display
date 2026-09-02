@@ -8,6 +8,7 @@
 #include "mempool.h"
 #include "bap.h"
 #include "custom_fonts.h"
+#include "glass.h"
 #include "stdio.h"
 #include "string.h"
 
@@ -42,11 +43,23 @@ void night_screen_create(void)
         return;
     }
 
-    night_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(night_screen, COLOR_NIGHT_BG, 0);
-    lv_obj_set_style_bg_opa(night_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(night_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(night_screen, LV_SCROLLBAR_MODE_OFF);
+    /* Night exists to be dim. Under Glass the wallpaper is kept at a fifth of
+     * its brightness over black rather than shown in full: enough structure to
+     * still feel like the same device, no light to speak of. No pane either;
+     * the figure and the chart sit straight on the dark. */
+    const bool glass = glass_active();
+    if (glass)
+    {
+        night_screen = glass_screen_create(GLASS_SCREEN_NIGHT, true);
+    }
+    else
+    {
+        night_screen = lv_obj_create(NULL);
+        lv_obj_set_style_bg_color(night_screen, COLOR_NIGHT_BG, 0);
+        lv_obj_set_style_bg_opa(night_screen, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(night_screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(night_screen, LV_SCROLLBAR_MODE_OFF);
+    }
 
     // Large hashrate display at the top
     hashrate_label = lv_label_create(night_screen);
@@ -65,9 +78,13 @@ void night_screen_create(void)
     // hashrate chart without borders
     hashrate_chart = lv_chart_create(night_screen);
     lv_obj_set_size(hashrate_chart, SCREEN_WIDTH - 70, SCREEN_HEIGHT - 140);
-    lv_obj_align(hashrate_chart, LV_ALIGN_BOTTOM_RIGHT, 0, -48);
+    lv_obj_align(hashrate_chart, LV_ALIGN_BOTTOM_RIGHT, 0, glass ? -16 : -48);
     lv_obj_set_style_bg_color(hashrate_chart, COLOR_NIGHT_BG, 0);
-    lv_obj_set_style_bg_opa(hashrate_chart, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(hashrate_chart, glass ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+    if (glass)
+    {
+        lv_obj_clear_flag(hashrate_chart, LV_OBJ_FLAG_CLICKABLE);
+    }
     lv_obj_set_style_border_width(hashrate_chart, 0, 0);
     lv_obj_set_style_radius(hashrate_chart, 0, 0);
     lv_obj_set_style_pad_all(hashrate_chart, 0, 0);
@@ -123,6 +140,11 @@ void night_screen_create(void)
     }
 
     apply_cached_hashrate();
+    if (glass)
+    {
+        glass_screen_ready(night_screen);
+        return;
+    }
     create_bottom_nav();
 }
 
@@ -130,6 +152,7 @@ void night_screen_destroy(void)
 {
     if (night_screen)
     {
+        glass_screen_detach(night_screen);
         lv_obj_del(night_screen);
         night_screen = NULL;
         hashrate_label = NULL;

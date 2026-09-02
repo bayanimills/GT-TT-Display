@@ -10,6 +10,7 @@
 #include "stdio.h"
 #include "string.h"
 #include "custom_fonts.h"
+#include "glass.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -523,26 +524,44 @@ void wifi_screen_create(void)
     }
     
     // Create the main screen
-    wifi_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(wifi_screen, COLOR_BACKGROUND, 0);
-    lv_obj_set_style_bg_opa(wifi_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(wifi_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(wifi_screen, LV_SCROLLBAR_MODE_OFF);
-    
-    // Create main container - leave space for bottom nav
-    lv_obj_t * main_cont = lv_obj_create(wifi_screen);
-    lv_obj_set_size(main_cont, SCREEN_WIDTH - 60, SCREEN_HEIGHT - 100);
-    lv_obj_align(main_cont, LV_ALIGN_TOP_MID, 0, 16);
-    lv_obj_set_style_bg_color(main_cont, COLOR_CARD_BG, 0);
-    lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(main_cont, 1, 0);
-    lv_obj_set_style_border_color(main_cont, COLOR_BORDER, 0);
-    lv_obj_set_style_border_opa(main_cont, LV_OPA_50, 0);
-    lv_obj_set_style_radius(main_cont, 14, 0);
-    lv_obj_set_style_pad_all(main_cont, 16, 0);
-    lv_obj_clear_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_OFF);
-    
+    const bool glass = glass_active();
+    lv_obj_t * main_cont;
+    if (glass) {
+        /* One pane fills the surface; the content container inside it carries
+         * the padding, because a pane's own padding would shift its crop. */
+        wifi_screen = glass_screen_create(GLASS_SCREEN_WIFI, false);
+        lv_obj_t * pane = glass_pane(wifi_screen, SCREEN_WIDTH - 48, SCREEN_HEIGHT - 44, 28);
+        lv_obj_align(pane, LV_ALIGN_TOP_MID, 0, 22);
+        main_cont = lv_obj_create(pane);
+        lv_obj_set_size(main_cont, SCREEN_WIDTH - 48, SCREEN_HEIGHT - 44);
+        lv_obj_set_pos(main_cont, 0, 0);
+        lv_obj_set_style_bg_opa(main_cont, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(main_cont, 0, 0);
+        lv_obj_set_style_pad_all(main_cont, 16, 0);
+        lv_obj_clear_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_OFF);
+    } else {
+        wifi_screen = lv_obj_create(NULL);
+        lv_obj_set_style_bg_color(wifi_screen, COLOR_BACKGROUND, 0);
+        lv_obj_set_style_bg_opa(wifi_screen, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(wifi_screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(wifi_screen, LV_SCROLLBAR_MODE_OFF);
+
+        // Create main container - leave space for bottom nav
+        main_cont = lv_obj_create(wifi_screen);
+        lv_obj_set_size(main_cont, SCREEN_WIDTH - 60, SCREEN_HEIGHT - 100);
+        lv_obj_align(main_cont, LV_ALIGN_TOP_MID, 0, 16);
+        lv_obj_set_style_bg_color(main_cont, COLOR_CARD_BG, 0);
+        lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(main_cont, 1, 0);
+        lv_obj_set_style_border_color(main_cont, COLOR_BORDER, 0);
+        lv_obj_set_style_border_opa(main_cont, LV_OPA_50, 0);
+        lv_obj_set_style_radius(main_cont, 14, 0);
+        lv_obj_set_style_pad_all(main_cont, 16, 0);
+        lv_obj_clear_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_OFF);
+    }
+
     // Title
     lv_obj_t * title_label = lv_label_create(main_cont);
     lv_label_set_text(title_label, "WIFI SETTINGS");
@@ -558,7 +577,8 @@ void wifi_screen_create(void)
     lv_obj_set_style_border_width(status_cont, 0, 0);
     lv_obj_set_style_pad_all(status_cont, 10, 0);
     lv_obj_clear_flag(status_cont, LV_OBJ_FLAG_SCROLLABLE);
-    
+    if (glass) lv_obj_clear_flag(status_cont, LV_OBJ_FLAG_CLICKABLE);
+
     // Current WiFi status (left side)
     lv_obj_t * current_wifi_cont = lv_obj_create(status_cont);
     lv_obj_set_size(current_wifi_cont, 320, 100);
@@ -566,7 +586,8 @@ void wifi_screen_create(void)
     lv_obj_set_style_bg_opa(current_wifi_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(current_wifi_cont, 0, 0);
     lv_obj_set_style_pad_all(current_wifi_cont, 0, 0);
-    
+    if (glass) lv_obj_clear_flag(current_wifi_cont, LV_OBJ_FLAG_CLICKABLE);
+
     lv_obj_t * wifi_icon = lv_label_create(current_wifi_cont);
     lv_label_set_text(wifi_icon, LV_SYMBOL_WIFI);
     lv_obj_set_style_text_color(wifi_icon, COLOR_ACCENT, 0);
@@ -607,7 +628,8 @@ void wifi_screen_create(void)
     lv_obj_set_style_bg_opa(ip_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ip_cont, 0, 0);
     lv_obj_set_style_pad_all(ip_cont, 0, 0);
-    
+    if (glass) lv_obj_clear_flag(ip_cont, LV_OBJ_FLAG_CLICKABLE);
+
     lv_obj_t * ip_icon = lv_label_create(ip_cont);
     lv_label_set_text(ip_icon, LV_SYMBOL_SETTINGS);
     lv_obj_set_style_text_color(ip_icon, COLOR_ACCENT, 0);
@@ -628,7 +650,8 @@ void wifi_screen_create(void)
     lv_obj_set_style_border_width(config_cont, 0, 0);
     lv_obj_set_style_pad_all(config_cont, 10, 0);
     lv_obj_clear_flag(config_cont, LV_OBJ_FLAG_SCROLLABLE);
-    
+    if (glass) lv_obj_clear_flag(config_cont, LV_OBJ_FLAG_CLICKABLE);
+
     // SSID dropdown
     lv_obj_t * ssid_label_input = lv_label_create(config_cont);
     lv_label_set_text(ssid_label_input, "Network Name (SSID):");
@@ -638,7 +661,8 @@ void wifi_screen_create(void)
     
     ssid_dropdown = create_ssid_dropdown(config_cont);
     lv_obj_align(ssid_dropdown, LV_ALIGN_TOP_LEFT, 0, 25);
-    
+    if (glass) glass_style_dropdown(ssid_dropdown);
+
     // Password input
     lv_obj_t * password_label_input = lv_label_create(config_cont);
     lv_label_set_text(password_label_input, "Password:");
@@ -648,7 +672,8 @@ void wifi_screen_create(void)
     
     password_ta = create_input_field(config_cont, "Enter password");
     lv_obj_align(password_ta, LV_ALIGN_TOP_LEFT, 350, 25);
-    lv_textarea_set_password_mode(password_ta, true);
+    if (glass) glass_style_textarea(password_ta);
+lv_textarea_set_password_mode(password_ta, true);
     if (strlen(current_wifi_info.password) > 0) {
         lv_textarea_set_text(password_ta, current_wifi_info.password);
     }
@@ -682,18 +707,37 @@ void wifi_screen_create(void)
     lv_obj_set_style_border_width(control_cont, 0, 0);
     lv_obj_set_style_pad_all(control_cont, 0, 0);
     lv_obj_clear_flag(control_cont, LV_OBJ_FLAG_SCROLLABLE);
+    if (glass) lv_obj_clear_flag(control_cont, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_flex_flow(control_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(control_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
     // Control buttons
-    create_wifi_button(control_cont, "Connect", wifi_connect_clicked);
-    create_wifi_button(control_cont, "Scan Networks", wifi_scan_clicked);
-    
+    lv_obj_t * connect_btn = create_wifi_button(control_cont, "Connect", wifi_connect_clicked);
+    lv_obj_t * scan_btn = create_wifi_button(control_cont, "Scan Networks", wifi_scan_clicked);
+    if (glass) {
+        glass_style_button(connect_btn, true);
+        glass_style_button(scan_btn, false);
+    }
+
     // Create keyboard (hidden by default)
     keyboard = lv_keyboard_create(wifi_screen);
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(keyboard, keyboard_event_cb, LV_EVENT_ALL, NULL);
-    
+    if (glass) glass_style_keyboard(keyboard);
+
+    if (glass) {
+        if (wifi_connect_pending) {
+            wifi_connection_state = WIFI_CONNECTION_STATE_CONNECTING;
+        } else if (current_wifi_info.is_connected) {
+            wifi_connection_state = WIFI_CONNECTION_STATE_CONNECTED;
+        } else {
+            wifi_connection_state = WIFI_CONNECTION_STATE_DISCONNECTED;
+        }
+        wifi_refresh_status_ui();
+        glass_screen_ready(wifi_screen);
+        return;
+    }
+
     // Bottom navigation bar - full width at bottom of screen
     lv_obj_t * bottom_nav = lv_obj_create(wifi_screen);
     lv_obj_set_size(bottom_nav, SCREEN_WIDTH, 64);
@@ -740,6 +784,7 @@ void wifi_screen_destroy(void)
         scan_completed = false;
         scan_event_received = false;
 
+        glass_screen_detach(wifi_screen);
         lv_obj_del(wifi_screen);
         wifi_screen = NULL;
         ssid_label = NULL;
