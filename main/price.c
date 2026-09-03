@@ -320,7 +320,15 @@ static bool price_fetch_from_url(const char *url)
     }
 
     long long rounded_price = (long long)(price + 0.5);
-    format_price_with_commas(rounded_price, current_price_text, sizeof(current_price_text));
+    char formatted[sizeof(current_price_text)];
+    format_price_with_commas(rounded_price, formatted, sizeof(formatted));
+    /* The home widget reads current_price_text on the LVGL task every second. */
+    if (lvgl_port_lock(-1))
+    {
+        strncpy(current_price_text, formatted, sizeof(current_price_text) - 1);
+        current_price_text[sizeof(current_price_text) - 1] = '\0';
+        lvgl_port_unlock();
+    }
     return true;
 }
 

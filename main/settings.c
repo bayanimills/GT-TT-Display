@@ -656,7 +656,14 @@ void settings_screen_create(void)
         lv_obj_set_style_radius(main_cont, 28, 0);
         lv_obj_set_style_pad_all(main_cont, 16, 0);
         lv_obj_add_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_OFF);
+        /* Most of settings, including the way back to Classic, is below the
+         * fold: a glass scrollbar says so. */
+        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_set_style_bg_color(main_cont, lv_color_white(), LV_PART_SCROLLBAR);
+        lv_obj_set_style_bg_opa(main_cont, LV_OPA_40, LV_PART_SCROLLBAR);
+        lv_obj_set_style_width(main_cont, 5, LV_PART_SCROLLBAR);
+        lv_obj_set_style_radius(main_cont, 3, LV_PART_SCROLLBAR);
+        lv_obj_set_style_pad_right(main_cont, 6, LV_PART_SCROLLBAR);
         lv_obj_set_scroll_dir(main_cont, LV_DIR_VER);
         lv_obj_set_style_pad_bottom(main_cont, 80, 0);
         glass_attach_drawer_toggle(main_cont);
@@ -825,7 +832,9 @@ void settings_screen_create(void)
     if (glass) lv_obj_clear_flag(theme_section, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *theme_title = lv_label_create(theme_section);
-    lv_label_set_text(theme_title, "Colour Theme:");
+    /* Under Glass the surface colours come from the wallpaper and only the
+     * accent (and the red and icon tints) of a preset applies, so say so. */
+    lv_label_set_text(theme_title, glass ? "Accent:" : "Colour Theme:");
     lv_obj_set_style_text_color(theme_title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(theme_title, &lv_font_montserrat_18, 0);
     lv_obj_align(theme_title, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -876,11 +885,15 @@ void settings_screen_create(void)
         THEME_ACCENT, THEME_BACKGROUND, THEME_CARD_BG,
         THEME_TEXT_PRIMARY, THEME_TEXT_SECONDARY, THEME_BORDER,
     };
-    for (size_t i = 0; i < sizeof(swatch_slots) / sizeof(swatch_slots[0]); i++) {
+    static const theme_slot_t glass_swatch_slots[] = { THEME_ACCENT, THEME_RED, THEME_ICON };
+    const theme_slot_t *slots = glass ? glass_swatch_slots : swatch_slots;
+    size_t slot_count = glass ? sizeof(glass_swatch_slots) / sizeof(glass_swatch_slots[0])
+                              : sizeof(swatch_slots) / sizeof(swatch_slots[0]);
+    for (size_t i = 0; i < slot_count; i++) {
         lv_obj_t *sw = lv_obj_create(theme_section);
         lv_obj_set_size(sw, 34, 24);
         lv_obj_align(sw, LV_ALIGN_TOP_LEFT, 140 + (int) i * 40, 44);
-        lv_obj_set_style_bg_color(sw, theme_color(swatch_slots[i]), 0);
+        lv_obj_set_style_bg_color(sw, theme_color(slots[i]), 0);
         lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, 0);
         lv_obj_set_style_border_width(sw, 1, 0);
         lv_obj_set_style_border_color(sw, COLOR_BORDER, 0);

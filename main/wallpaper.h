@@ -30,8 +30,16 @@ const char *wallpaper_name(int index);
 /* Rasterise wallpaper `index` at full screen size into PSRAM (both variants).
  * Re-renders only when the index changes. Returns false if memory ran out, in
  * which case wallpaper_image() returns NULL and callers must fall back to a
- * flat colour. */
+ * flat colour. Synchronous: blocks the caller for the whole render. */
 bool wallpaper_prepare(int index);
+
+/* Same, on a worker task that never holds the LVGL lock while it renders.
+ * `done` is called on the worker under the LVGL lock once the new buffers are
+ * installed (ok=false if allocation failed). If the wallpaper is already
+ * current, `done(true)` is called synchronously before this returns. A
+ * request that arrives while a render is in flight is queued and run after. */
+typedef void (*wallpaper_done_cb_t)(bool ok);
+void wallpaper_prepare_async(int index, wallpaper_done_cb_t done);
 int  wallpaper_current(void);
 
 const lv_img_dsc_t *wallpaper_image(wallpaper_variant_t variant);

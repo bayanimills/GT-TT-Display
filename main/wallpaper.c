@@ -4,6 +4,12 @@
 #include "wallpaper.h"
 #include "home.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "lvgl_port.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static const char *TAG = "wallpaper";
 
 #ifndef MALLOC_CAP_SPIRAM
 #define MALLOC_CAP_SPIRAM 0
@@ -63,7 +69,7 @@ static const scene_t k_scenes[] = {
         { { 0.84f, 0.52f, 0.34f, 0xF07A3A, 0xE23560, 0.70f },
           { 0.16f, 0.13f, 0.18f, 0xF5C04E, 0xEE6E36, 0.70f },
           { 0.55f, 0.24f, 0.07f, 0xFFFFFF, 0xFFE0C0, 0.30f } }, 3,
-        { { 0 } }, 0,
+        { { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f } }, 0,
     },
     {
         "Graphite", 0x0B0B0E, 0x1C1D23,
@@ -80,6 +86,20 @@ static const scene_t k_scenes[] = {
 static uint16_t     *s_buf[WALLPAPER_VARIANT_COUNT];
 static lv_img_dsc_t  s_dsc[WALLPAPER_VARIANT_COUNT];
 static int           s_current = -1;
+static uint32_t      s_generation = 0;     /* bumped by release; stale jobs discard */
+static bool          s_job_running = false;
+static int           s_pending_index = -1;
+static wallpaper_done_cb_t s_pending_cb = NULL;
+
+/* 768KB per buffer: PSRAM only, never the internal heap. The sim can be
+ * asked to fail the allocation so the flat-pane fallback is exercised. */
+static uint16_t *wp_alloc(size_t bytes)
+{
+#ifndef ESP_PLATFORM
+    if (getenv("SIM_FAIL_SPIRAM")) return NULL;
+#endif
+    return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+}
 
 static const uint8_t k_bayer[8][8] = {
     {  0, 32,  8, 40,  2, 34, 10, 42 },
@@ -285,9 +305,9 @@ bool wallpaper_prepare(int index)
     const size_t bytes = (size_t) SCREEN_WIDTH * SCREEN_HEIGHT * 2;
     for (int v = 0; v < WALLPAPER_VARIANT_COUNT; v++) {
         if (s_buf[v]) continue;
-        /* 768KB each: PSRAM only, never the internal heap. */
-        s_buf[v] = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+        s_buf[v] = wp_alloc(bytes);
         if (!s_buf[v]) {
+            ESP_LOGW(TAG, "PSRAM allocation failed; no wallpaper");
             wallpaper_release();
             return false;
         }
@@ -324,4 +344,94 @@ void wallpaper_release(void)
         s_buf[v] = NULL;
     }
     s_current = -1;
+    s_generation++;
+}
+
+typedef struct {
+    int index;
+    uint32_t generation;
+    wallpaper_done_cb_t done;
+} wallpaper_job_t;
+
+static void wallpaper_start_job(int index, wallpaper_done_cb_t done);
+
+/* Worker: render into scratch buffers with no lock held, then take the LVGL
+ * lock only to swap the buffers in. The swap is a few pointer writes, so the
+ * lock is held for microseconds instead of the whole render. */
+static void wallpaper_task(void *arg)
+{
+    wallpaper_job_t job = *(wallpaper_job_t *) arg;
+    free(arg);
+
+    const size_t bytes = (size_t) SCREEN_WIDTH * SCREEN_HEIGHT * 2;
+    uint16_t *scratch[WALLPAPER_VARIANT_COUNT] = { NULL, NULL };
+    bool ok = true;
+    for (int v = 0; v < WALLPAPER_VARIANT_COUNT && ok; v++) {
+        scratch[v] = wp_alloc(bytes);
+        if (!scratch[v]) ok = false;
+    }
+    if (ok) {
+        render_scene(&k_scenes[job.index], scratch[WALLPAPER_SHARP], SCREEN_WIDTH, SCREEN_HEIGHT, false);
+        render_scene(&k_scenes[job.index], scratch[WALLPAPER_FROST], SCREEN_WIDTH, SCREEN_HEIGHT, true);
+    } else {
+        ESP_LOGW(TAG, "PSRAM allocation failed; no wallpaper");
+    }
+
+    lvgl_port_lock(-1);
+    if (ok && job.generation == s_generation) {
+        for (int v = 0; v < WALLPAPER_VARIANT_COUNT; v++) {
+            if (s_buf[v]) heap_caps_free(s_buf[v]);
+            s_buf[v] = scratch[v];
+            fill_dsc(&s_dsc[v], s_buf[v], SCREEN_WIDTH, SCREEN_HEIGHT);
+        }
+        s_current = job.index;
+    } else {
+        for (int v = 0; v < WALLPAPER_VARIANT_COUNT; v++) {
+            if (scratch[v]) heap_caps_free(scratch[v]);
+        }
+        if (ok) ok = false;   /* released while rendering: nothing installed */
+    }
+    s_job_running = false;
+    if (job.done) job.done(ok);
+    if (s_pending_index >= 0) {
+        int next = s_pending_index;
+        wallpaper_done_cb_t cb = s_pending_cb;
+        s_pending_index = -1;
+        s_pending_cb = NULL;
+        wallpaper_start_job(next, cb);
+    }
+    lvgl_port_unlock();
+    vTaskDelete(NULL);
+}
+
+static void wallpaper_start_job(int index, wallpaper_done_cb_t done)
+{
+    wallpaper_job_t *job = malloc(sizeof(*job));
+    if (!job) { if (done) done(false); return; }
+    job->index = index;
+    job->generation = s_generation;
+    job->done = done;
+    s_job_running = true;
+    if (xTaskCreate(wallpaper_task, "wallpaper", 4096, job, 3, NULL) != pdPASS) {
+        s_job_running = false;
+        free(job);
+        ESP_LOGW(TAG, "could not start wallpaper task; rendering inline");
+        bool ok = wallpaper_prepare(index);
+        if (done) done(ok);
+    }
+}
+
+void wallpaper_prepare_async(int index, wallpaper_done_cb_t done)
+{
+    if (index < 0 || index >= SCENE_COUNT) index = 0;
+    if (index == s_current && s_buf[WALLPAPER_SHARP] && s_buf[WALLPAPER_FROST]) {
+        if (done) done(true);
+        return;
+    }
+    if (s_job_running) {
+        s_pending_index = index;
+        s_pending_cb = done;
+        return;
+    }
+    wallpaper_start_job(index, done);
 }

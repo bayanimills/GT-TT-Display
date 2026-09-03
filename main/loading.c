@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "esp_task_wdt.h"
 #include "display_control.h"
+#include "ota_update.h"
 
 /*********************
  *      DEFINES
@@ -155,6 +156,8 @@ static void finish_loading(void)
     home_screen_create();
     lv_scr_load(home_get_screen());
     display_control_create_power_button();
+    /* The first real screen is up: this build is usable enough to confirm. */
+    ota_update_confirm_running_image();
 
     ESP_LOGI(TAG, "Creating BAP initialization task...");
     xTaskCreate(bap_init_task, "bap_init", 8192, NULL, 10, NULL);

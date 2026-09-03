@@ -3,3 +3,5 @@ gtsim
 sim_nvs.txt
 shots/
 *.o
+gtsim-asan
+build-asan/

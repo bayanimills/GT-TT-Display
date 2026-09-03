@@ -16,6 +16,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -488,7 +489,10 @@ static void ta_event_handler(lv_event_t *e) {
         if (keyboard && lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN)) {
             lv_keyboard_set_textarea(keyboard, ta);
             lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(keyboard); 
+            lv_obj_move_foreground(keyboard);
+            /* The keyboard over the Wi-Fi screen is the known RAM peak. */
+            ESP_LOGI(TAG, "free internal heap with keyboard up: %u",
+                     (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
         }
     } else if (code == LV_EVENT_DEFOCUSED) {
         if (keyboard && !lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN)) {
@@ -697,7 +701,7 @@ void wifi_screen_create(void)
     password_ta = create_input_field(config_cont, "Enter password");
     lv_obj_align(password_ta, LV_ALIGN_TOP_LEFT, 350, 25);
     if (glass) glass_style_textarea(password_ta);
-lv_textarea_set_password_mode(password_ta, true);
+    lv_textarea_set_password_mode(password_ta, true);
     if (strlen(current_wifi_info.password) > 0) {
         lv_textarea_set_text(password_ta, current_wifi_info.password);
     }
@@ -811,6 +815,7 @@ void wifi_screen_destroy(void)
         scan_completed = false;
         scan_event_received = false;
 
+        keyboard_dismissed_recently = false;
         glass_screen_detach(wifi_screen);
         lv_obj_del(wifi_screen);
         wifi_screen = NULL;

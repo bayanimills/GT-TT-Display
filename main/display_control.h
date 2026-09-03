@@ -21,6 +21,14 @@ void display_control_set_power_button_visible(bool visible);
 /* Restyle the corner control for the active skin; screens call it as they
  * are built so a skin change is reflected wherever the user lands next. */
 void display_control_refresh_skin(void);
+
+/* While a modal surface (drawer, sheet) is up the corner control must not be
+ * live above it. Nested: every push needs a pop. */
+void display_control_push_overlay(void);
+void display_control_pop_overlay(void);
+
+/* Night screen: render the control as a barely-there dark disc. */
+void display_control_set_power_button_dim(bool dim);
 void display_control_get_config(display_control_config_t *config);
 esp_err_t display_control_set_config(const display_control_config_t *config);
 bool display_control_is_backlight_on(void);

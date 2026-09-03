@@ -101,11 +101,25 @@ SemaphoreHandle_t xSemaphoreCreateRecursiveMutex(void)
 }
 SemaphoreHandle_t xSemaphoreCreateBinary(void) { return xSemaphoreCreateMutex(); }
 
+/* Honour the timeout: on the device lvgl_port_lock(50) can fail while a
+ * long render holds the mutex, and that path must be reachable here too. */
 BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t wait)
 {
-    (void) wait;
     if (!s) return pdFALSE;
-    return pthread_mutex_lock((pthread_mutex_t *) s) == 0 ? pdTRUE : pdFALSE;
+    if (wait == portMAX_DELAY) {
+        return pthread_mutex_lock((pthread_mutex_t *) s) == 0 ? pdTRUE : pdFALSE;
+    }
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    long long end_ns = (long long) deadline.tv_sec * 1000000000LL + deadline.tv_nsec + (long long) wait * 1000000LL;
+    for (;;) {
+        if (pthread_mutex_trylock((pthread_mutex_t *) s) == 0) return pdTRUE;
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if ((long long) now.tv_sec * 1000000000LL + now.tv_nsec >= end_ns) return pdFALSE;
+        struct timespec nap = { 0, 1000000L };
+        nanosleep(&nap, NULL);
+    }
 }
 BaseType_t xSemaphoreGive(SemaphoreHandle_t s)
 {

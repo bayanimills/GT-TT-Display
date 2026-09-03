@@ -480,8 +480,11 @@ static void LV_ATTRIBUTE_FAST_MEM draw_shadow(lv_draw_ctx_t * draw_ctx, const lv
 
 #if LV_SHADOW_CACHE_SIZE
     if(sh_cache_size == corner_size && sh_cache_r == r_sh) {
-        /*Use the cache if available*/
-        sh_buf = lv_mem_buf_get(corner_size * corner_size);
+        /*Use the cache if available. Allocate the same size as the
+         *non-cached path: the corner loops below copy corner_size bytes per
+         *row from an x-shifted pointer and read up to corner_size-1 bytes past
+         *the mask, which only stays inside the buffer at the larger size.*/
+        sh_buf = lv_mem_buf_get(corner_size * corner_size * sizeof(uint16_t));
         lv_memcpy(sh_buf, sh_cache, corner_size * corner_size);
     }
     else {

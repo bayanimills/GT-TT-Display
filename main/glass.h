@@ -119,6 +119,10 @@ void glass_screen_ready(lv_obj_t *scr);
  * accent instead of white. */
 void glass_pill_label(lv_obj_t *label, bool accent);
 
+/* Rebuild the current glass screen in place (scratch-screen swap). Used when
+ * the wallpaper finishes rendering off the LVGL task. */
+void glass_rebuild_host(void);
+
 /* Restyle stock widgets for the material. */
 void glass_style_button(lv_obj_t *btn, bool filled);
 void glass_style_dropdown(lv_obj_t *dd);

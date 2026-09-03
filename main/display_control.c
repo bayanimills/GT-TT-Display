@@ -55,6 +55,8 @@ static lv_timer_t *schedule_timer = NULL;
 static lv_obj_t *power_button = NULL;
 static lv_obj_t *power_icon_parts[3] = { NULL, NULL, NULL };
 static bool button_visibility_requested = true;
+static int overlay_depth = 0;
+static bool button_dim = false;
 
 static bool display_control_get_local_minute(uint16_t *minute_of_day);
 static void display_control_evaluate(void);
@@ -114,6 +116,24 @@ void display_control_create_power_button(void)
 
 void display_control_refresh_skin(void)
 {
+    display_control_apply_skin();
+}
+
+void display_control_push_overlay(void)
+{
+    overlay_depth++;
+    display_control_refresh_power_button_visibility();
+}
+
+void display_control_pop_overlay(void)
+{
+    if (overlay_depth > 0) overlay_depth--;
+    display_control_refresh_power_button_visibility();
+}
+
+void display_control_set_power_button_dim(bool dim)
+{
+    button_dim = dim;
     display_control_apply_skin();
 }
 
@@ -296,11 +316,12 @@ static void display_control_apply_skin(void)
     bool glass = theme_get_skin() == THEME_SKIN_GLASS;
     /* Glass: a dark disc with a white rim and glyph, the same material as the
      * drawer buttons, so it reads on any wallpaper. Classic: PR #8's card. */
+    bool dim = glass && button_dim;
     lv_obj_set_style_bg_color(power_button, glass ? lv_color_black() : COLOR_CARD_BG, 0);
-    lv_obj_set_style_bg_opa(power_button, glass ? LV_OPA_40 : LV_OPA_70, 0);
+    lv_obj_set_style_bg_opa(power_button, dim ? LV_OPA_60 : (glass ? LV_OPA_40 : LV_OPA_70), 0);
     lv_obj_set_style_border_color(power_button, glass ? lv_color_white() : COLOR_ACCENT, 0);
-    lv_obj_set_style_border_opa(power_button, glass ? LV_OPA_40 : LV_OPA_COVER, 0);
-    lv_color_t glyph = glass ? lv_color_white() : COLOR_ACCENT;
+    lv_obj_set_style_border_opa(power_button, dim ? LV_OPA_10 : (glass ? LV_OPA_40 : LV_OPA_COVER), 0);
+    lv_color_t glyph = glass ? (dim ? lv_color_hex(0x606060) : lv_color_white()) : COLOR_ACCENT;
     if (power_icon_parts[0]) lv_obj_set_style_border_color(power_icon_parts[0], glyph, 0);
     if (power_icon_parts[1]) lv_obj_set_style_bg_color(power_icon_parts[1], glyph, 0);
     if (power_icon_parts[2]) lv_obj_set_style_bg_color(power_icon_parts[2], glyph, 0);
@@ -314,7 +335,7 @@ static void display_control_refresh_power_button_visibility(void)
     display_control_apply_skin();
 
     display_button_visibility_t visibility = display_button_visibility_resolve(
-        button_visibility_requested, current_config.power_button_visuals_visible);
+        button_visibility_requested && overlay_depth == 0, current_config.power_button_visuals_visible);
 
     if (visibility.interactive) {
         lv_obj_clear_flag(power_button, LV_OBJ_FLAG_HIDDEN);

@@ -90,8 +90,8 @@ S <slot> <rrggbb>   override one palette slot
 C                   commit theme (persist + rebuild screen)
 K <skin>            select skin: 0 classic, 1 glass (home rebuilds)
 G <what> <value>    glass skin: layout 0|1, widgets <hexmask>, wall <index>,
-                    drawer 0|1, sheet 0..5 (widgets, layout, wallpaper, pool,
-                    icons), scroll <px>
+                    drawer 0|1, sheet 0..5 (widgets, layout, style, pool;
+                    5 also opens style), scroll <px>
 N <screen>          home night block clock price mempool wifi settings
 D off | D mode <n>  display off (as the corner control); button mode 0..3
 R                   force repaint
@@ -130,3 +130,10 @@ Frames come back on stdout as `"GTFB" | u32 frame | u16 w | u16 h | RGB565 LE`.
 - `SIM_OFFLINE=1` is set by default so `price.c` / `mempool.c` do not stall on
   network calls. Unset it to let them fetch for real through `curl`.
 - `SIM_TASKS=0` disables background task spawning if you are chasing a crash.
+- `SIM_FAIL_SPIRAM=1` makes the wallpaper's PSRAM allocation fail, so the
+  Glass flat-pane fallback can be seen. `lvgl_port_lock(timeout)` honours its
+  timeout in the sim, as it does on the device.
+- `make SAN=1` builds `gtsim-asan` with AddressSanitizer for use-after-free
+  hunting; `shot.py --binary ./gtsim-asan` drives it like the normal binary.
+- With `LV_MEM_CUSTOM 1` LVGL allocates from the heap, so the sim's memory
+  report prints n/a rather than pool headroom.

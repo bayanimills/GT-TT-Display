@@ -135,6 +135,7 @@ void mempool_screen_create(void)
     lv_obj_set_style_text_color(title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
+    if (glass) glass_pill_label(title, false);
 
     mempool_status_label = lv_label_create(mempool_screen);
     lv_label_set_text(mempool_status_label, "LOADING...");
@@ -142,6 +143,7 @@ void mempool_screen_create(void)
     lv_obj_set_style_text_opa(mempool_status_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(mempool_status_label, &lv_font_montserrat_16, 0);
     lv_obj_align(mempool_status_label, LV_ALIGN_TOP_MID, 0, 48);
+    if (glass) glass_pill_label(mempool_status_label, false);
 
     mempool_row = lv_obj_create(mempool_screen);
     const int row_y = 76;
@@ -376,7 +378,10 @@ static bool mempool_fetch_once(void)
         return false;
     }
 
-    mempool_block_count = 0;
+    /* Parse into a local set and publish it under the LVGL lock: the home
+     * widget and the card builder read mempool_blocks on the LVGL task. */
+    mempool_block_t parsed[MEMPOOL_MAX_BLOCKS];
+    int parsed_count = 0;
 
     for (int i = 0; i < obj_count && i < MEMPOOL_MAX_BLOCKS; i++)
     {
@@ -424,11 +429,18 @@ static bool mempool_fetch_once(void)
         block.total_fees_sat = total_fees;
         block.minutes_ago = compute_minutes_ago(ts);
 
-        mempool_blocks[mempool_block_count++] = block;
+        parsed[parsed_count++] = block;
         free(obj);
     }
 
-    return mempool_block_count > 0;
+    if (parsed_count > 0 && lvgl_port_lock(-1))
+    {
+        memcpy(mempool_blocks, parsed, sizeof(mempool_block_t) * (size_t)parsed_count);
+        mempool_block_count = parsed_count;
+        lvgl_port_unlock();
+    }
+
+    return parsed_count > 0;
 }
 
 static bool mempool_ensure_netif(void)

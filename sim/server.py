@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import select
+import socket
 import subprocess
 import threading
 import time
@@ -290,6 +291,51 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, b"not found", "text/plain")
 
 
+class SimServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+class SimServer6(SimServer):
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        # Linux defaults bindv6only=0, so a :: socket would also claim IPv4 and
+        # collide with the v4 socket we bind alongside it. Pin this one to v6.
+        try:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        except (AttributeError, OSError):
+            pass
+        return super().server_bind()
+
+
+def serve(bind, port):
+    """Return every listening socket the browser might reach us on.
+
+    Windows browsers resolve "localhost" to ::1 before 127.0.0.1, and WSL2's
+    port relay treats the two families separately: a v4-only bind refuses ::1,
+    and a v6 bind with V6ONLY off still does not answer 127.0.0.1. Binding
+    both with IPv4 first silently binds only IPv4, because the later :: socket
+    also claims IPv4 and collides. So bind one socket per family, v6 pinned to
+    v6, each on its own thread, and fall back to IPv4 alone if v6 is
+    unavailable. curl picks IPv4, which is why an IPv4-only bind looks healthy
+    from the shell while the browser cannot connect at all.
+    """
+    servers = []
+    if bind in ("", "0.0.0.0", "::"):
+        for cls, addr in ((SimServer, ("0.0.0.0", port)), (SimServer6, ("::", port))):
+            try:
+                servers.append(cls(addr, Handler))
+            except OSError as e:
+                print("note: could not bind %s: %s" % (addr[0], e), flush=True)
+    else:
+        servers.append(SimServer((bind, port), Handler))
+
+    if not servers:
+        raise SystemExit("could not bind port %d" % port)
+    return servers
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8010)
@@ -315,12 +361,19 @@ def main():
                 sim.send("B " + s)
     threading.Thread(target=seed, daemon=True).start()
 
-    httpd = ThreadingHTTPServer((args.bind, args.port), Handler)
-    httpd.sim = sim
-    httpd.mirror = mirror
-    print("Turbo Touch sim on http://localhost:%d  (%dx%d)" % (args.port, W, H))
+    servers = serve(args.bind, args.port)
+    for srv in servers:
+        srv.sim = sim
+        srv.mirror = mirror
+    for srv in servers[1:]:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    httpd = servers[0]
+    # Flushed: when stdout is a pipe the banner otherwise sits in a buffer,
+    # which is exactly what hid a silent bind failure once.
+    print("Turbo Touch sim on http://localhost:%d and http://127.0.0.1:%d  (%dx%d), %d listener(s)"
+          % (args.port, args.port, W, H, len(servers)), flush=True)
     if args.live:
-        print("mirroring %s over BAP" % args.live)
+        print("mirroring %s over BAP" % args.live, flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

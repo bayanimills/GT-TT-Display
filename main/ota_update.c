@@ -10,6 +10,7 @@
 #include "waveshare_rgb_lcd_port.h"
 #include "esp_log.h"
 #include "esp_https_ota.h"
+#include "esp_ota_ops.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_app_desc.h"
@@ -401,6 +402,24 @@ cleanup:
     xSemaphoreGive(ota_mutex);
 
     vTaskDelete(NULL);
+}
+
+void ota_update_confirm_running_image(void)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+
+    if (esp_ota_get_state_partition(running, &state) != ESP_OK) {
+        return;
+    }
+    if (state != ESP_OTA_IMG_PENDING_VERIFY) {
+        return;
+    }
+    if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+        ESP_LOGI(TAG, "OTA image confirmed on %s", running->label);
+    } else {
+        ESP_LOGE(TAG, "failed to confirm OTA image; will roll back on reboot");
+    }
 }
 
 void ota_check_for_updates(void)

@@ -5,7 +5,6 @@
 #include "display_control.h"
 
 #include "esp_log.h"
-#include "esp_ota_ops.h"
 #include "nvs_flash.h"
 
 static const char *TAG = "main";
@@ -21,31 +20,6 @@ static void storage_init(void)
     }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "NVS init failed (%s); running with defaults", esp_err_to_name(err));
-    }
-}
-
-/* With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE a freshly OTA'd image boots as
- * PENDING_VERIFY and is reverted on the next boot unless it confirms itself.
- * We confirm once the panel and the first screen are up, which is the bar for
- * "this build is usable enough to OTA again from". A build that crashes before
- * this point rolls back to the previous slot on its own.
- *
- * No-op on the factory partition, so USB-flashed images are unaffected. */
-static void confirm_ota_image(void)
-{
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    esp_ota_img_states_t state;
-
-    if (esp_ota_get_state_partition(running, &state) != ESP_OK) {
-        return;
-    }
-    if (state != ESP_OTA_IMG_PENDING_VERIFY) {
-        return;
-    }
-    if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
-        ESP_LOGI(TAG, "OTA image confirmed on %s", running->label);
-    } else {
-        ESP_LOGE(TAG, "failed to confirm OTA image; will roll back on reboot");
     }
 }
 
@@ -77,5 +51,4 @@ void app_main()
         lvgl_port_unlock();
     }
 
-    confirm_ota_image();
 }

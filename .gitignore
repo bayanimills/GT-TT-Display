@@ -44,3 +44,5 @@ compile_commands.json
 
 # Node Modules
 node_modules/
+# Agent worktrees and local Claude state
+.claude/

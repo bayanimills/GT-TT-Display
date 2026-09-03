@@ -6,6 +6,12 @@ LVGL    := $(ROOT)/components/lvgl__lvgl
 MAIN    := $(ROOT)/main
 BUILD   := build
 TARGET  := gtsim
+# make SAN=1 -> gtsim-asan, objects under build-asan/
+ifeq ($(SAN),1)
+BUILD   := build-asan
+TARGET  := gtsim-asan
+SANFLAGS := -fsanitize=address -fno-omit-frame-pointer
+endif
 
 # Excluded from main/: the real panel driver, the ESP LVGL port and the
 # firmware entry point -- sim_main.c replaces all three.
@@ -29,8 +35,8 @@ CFLAGS := -O1 -g -std=gnu11 -DLV_CONF_INCLUDE_SIMPLE $(INC) \
           -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable \
           -Wno-format -Wno-format-truncation -Wno-implicit-fallthrough \
           -Wno-missing-braces -Wno-incompatible-pointer-types -Wno-int-conversion \
-          -Wno-discarded-qualifiers -Wno-sign-compare
-LDFLAGS := -lm -lpthread
+          -Wno-discarded-qualifiers -Wno-sign-compare $(SANFLAGS)
+LDFLAGS := -lm -lpthread $(SANFLAGS)
 
 .PHONY: all clean run
 all: $(TARGET)

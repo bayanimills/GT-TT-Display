@@ -39,6 +39,12 @@ typedef struct {
 
 void ota_check_for_updates(void);
 
+/* With rollback enabled a freshly OTA'd image boots PENDING_VERIFY and is
+ * reverted on the next boot unless it confirms itself. Call this once the
+ * first real screen exists, so a build that crashes constructing it rolls
+ * back on its own. No-op on the factory partition. */
+void ota_update_confirm_running_image(void);
+
 esp_err_t ota_update_start_latest(void);
 
 esp_err_t ota_update_start(const char *url);

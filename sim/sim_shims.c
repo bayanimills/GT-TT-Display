@@ -27,6 +27,7 @@ esp_err_t ota_update_start_latest(void) { return ESP_FAIL; }
 esp_err_t ota_update_start(const char *url) { (void) url; return ESP_FAIL; }
 void ota_update_get_info(ota_info_t *info) { if (info) *info = s_ota; }
 bool ota_update_is_running(void) { return false; }
+void ota_update_confirm_running_image(void) { ESP_LOGI(TAG, "ota: image confirmed (sim no-op)"); }
 const char *ota_get_current_version(void) { return "sim"; }
 
 void ota_screen_show(void) { }

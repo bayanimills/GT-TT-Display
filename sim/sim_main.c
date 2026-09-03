@@ -140,10 +140,9 @@ static const sim_screen_t k_screens[] = {
 #define SCREEN_COUNT ((int) (sizeof(k_screens) / sizeof(k_screens[0])))
 
 
-/* LVGL runs on a fixed pool (LV_MEM_SIZE in lv_conf.h, shared with the
- * firmware), so headroom is a real constraint on how much a screen can build.
- * Report it after every screen change -- an OOM here shows up on hardware as
- * lv_obj_create() quietly returning NULL and the next call segfaulting. */
+/* With LV_MEM_CUSTOM 1 LVGL allocates from the general heap and keeps no pool
+ * statistics, so this prints n/a; it is kept for builds that switch back to
+ * a fixed pool, where headroom is the constraint on what a screen can build. */
 static void report_mem(const char *what)
 {
     lv_mem_monitor_t m;
@@ -256,6 +255,7 @@ static void handle_command(char *line)
     }
     case 'K':
         theme_set_skin((theme_skin_t) atoi(arg));
+        display_control_refresh_skin();
         break;
     case 'G': {
         /* Glass skin controls: layout <0|1>, widgets <hexmask>, wall <index>,
@@ -315,7 +315,9 @@ static void poll_stdin(void)
         if (!fgets(buf, sizeof(buf), stdin)) { s_running = false; return; }
         char *nl = strpbrk(buf, "\r\n");
         if (nl) *nl = 0;
-        if (buf[0]) handle_command(buf);
+        /* Commands touch LVGL objects, and the price/mempool tasks take the same
+         * lock to update labels: hold it here or the two race. */
+        if (buf[0]) { lvgl_port_lock(-1); handle_command(buf); lvgl_port_unlock(); }
         FD_ZERO(&fds);
         FD_SET(STDIN_FILENO, &fds);
         tv.tv_sec = 0;
