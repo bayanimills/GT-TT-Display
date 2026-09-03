@@ -77,4 +77,13 @@ void         theme_set_skin(theme_skin_t skin);
 /* The screen layer registers how to rebuild itself after a theme change. */
 void theme_register_reload(void (*reload_cb)(void));
 
+/* Black or white, whichever reads better on `bg`.
+ *
+ * For a glyph sitting on a filled accent shape. The themable
+ * THEME_TEXT_ON_ACCENT slot cannot answer this on its own: one value has
+ * to serve nine presets plus whatever the user picks, and on the Bitaxe
+ * Red accent it produced a near-black glyph on a dark red disc, about
+ * 2.4:1, under the 3:1 a UI component needs. Deriving it from the actual
+ * background is right for every palette including custom ones. */
+lv_color_t theme_ink_on(lv_color_t bg);
 #endif /* THEME_H */

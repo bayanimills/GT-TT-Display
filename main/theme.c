@@ -203,3 +203,15 @@ void theme_set_slot(theme_slot_t slot, uint32_t rgb)
     s_active[slot] = rgb & 0xFFFFFF;
     s_custom = true;
 }
+
+lv_color_t theme_ink_on(lv_color_t bg)
+{
+    const uint32_t c = lv_color_to32(bg);
+    const uint32_t r = (c >> 16) & 0xFFu;
+    const uint32_t g = (c >> 8) & 0xFFu;
+    const uint32_t b = c & 0xFFu;
+    /* Rec. 709 luma in fixed point. Enough to choose between black and
+     * white, and no pow() on a part with better uses for its cycles. */
+    const uint32_t luma = (54u * r + 183u * g + 19u * b) >> 8;
+    return luma > 140u ? lv_color_black() : lv_color_white();
+}

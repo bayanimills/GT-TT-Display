@@ -43,12 +43,20 @@ static const char *TAG = "glass";
 #define SINGLE_H      88
 #define CARD_RADIUS   24
 
-#define DRAWER_H      124
+#define DRAWER_H      308
 #define DRAWER_MARGIN 14
-/* The drawer row is SCREEN_WIDTH - 2*DRAWER_MARGIN - 16 = 756 px wide and
- * holds eleven buttons, so anything above 68 pushes the last caption past
- * the edge, where the row clips it. Widen this only by taking a button out. */
-#define DRAWER_BTN_W  68
+/* The drawer is a grid of destinations over a row of customise actions.
+ *
+ * It used to be one row of eleven 68 px buttons with 14 px captions, which is
+ * as small as this panel can render and still pretend to be readable, and it
+ * had no room left for another screen. Five columns of 148 px give an icon you
+ * can identify across a desk and a caption at 16 px. Ten cells over two rows
+ * leaves one spare for the next screen. */
+#define DRAWER_COLS   5
+#define CELL_W        146
+#define CELL_H        102
+#define CELL_DISC     62
+#define GRID_W        (DRAWER_COLS * CELL_W)
 
 /* Text tiers. Captions and sub-values each have a floor; nothing on a pane is
  * drawn fainter than the sub-value tier. Contrast itself is guaranteed by the
@@ -657,12 +665,13 @@ static lv_obj_t *glass_icon_symbol(lv_obj_t *parent, const char *symbol, const l
     return l;
 }
 
-/* Round glass button with an icon (symbol text or image) and a caption. */
-static lv_obj_t *glass_round_button(lv_obj_t *parent, const char *symbol, const lv_img_dsc_t *img,
-                                    const char *caption, lv_event_cb_t cb, void *user_data, bool active)
+/* One destination in the drawer grid: a disc with an icon, a caption under it,
+ * and the whole cell as the touch target. */
+static lv_obj_t *glass_grid_cell(lv_obj_t *parent, const char *symbol, const lv_img_dsc_t *img,
+                                 const char *caption, lv_event_cb_t cb, void *user_data, bool active)
 {
     lv_obj_t *cont = lv_obj_create(parent);
-    lv_obj_set_size(cont, DRAWER_BTN_W, 84);
+    lv_obj_set_size(cont, CELL_W, CELL_H);
     lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(cont, 0, 0);
     lv_obj_set_style_pad_all(cont, 0, 0);
@@ -670,8 +679,8 @@ static lv_obj_t *glass_round_button(lv_obj_t *parent, const char *symbol, const 
     if (cb) lv_obj_add_event_cb(cont, cb, LV_EVENT_CLICKED, user_data);
 
     lv_obj_t *btn = lv_obj_create(cont);
-    lv_obj_set_size(btn, 54, 54);
-    lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_size(btn, CELL_DISC, CELL_DISC);
+    lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, 4);
     lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(btn, active ? COLOR_ACCENT : lv_color_white(), 0);
     lv_obj_set_style_bg_opa(btn, active ? LV_OPA_90 : LV_OPA_20, 0);
@@ -686,18 +695,43 @@ static lv_obj_t *glass_round_button(lv_obj_t *parent, const char *symbol, const 
     if (img) {
         lv_obj_t *i = lv_img_create(btn);
         lv_img_set_src(i, img);
-        lv_obj_set_style_img_recolor(i, active ? COLOR_TEXT_ON_ACCENT : lv_color_hex(DARK_PRIMARY), 0);
+        lv_obj_set_style_img_recolor(i, active ? theme_ink_on(COLOR_ACCENT) : lv_color_hex(DARK_PRIMARY), 0);
         lv_obj_set_style_img_recolor_opa(i, LV_OPA_COVER, 0);
         lv_obj_center(i);
     } else {
-        lv_obj_t *l = glass_label(btn, symbol, &lv_font_montserrat_22, LV_OPA_COVER);
-        if (active) lv_obj_set_style_text_color(l, COLOR_TEXT_ON_ACCENT, 0);
+        lv_obj_t *l = glass_label(btn, symbol, &lv_font_montserrat_26, LV_OPA_COVER);
+        if (active) lv_obj_set_style_text_color(l, theme_ink_on(COLOR_ACCENT), 0);
         lv_obj_center(l);
     }
 
-    lv_obj_t *cap = glass_label(cont, caption, &lv_font_montserrat_14, CAPTION_OPA);
+    lv_obj_t *cap = glass_label(cont, caption, &lv_font_montserrat_16, CAPTION_OPA);
     lv_obj_align(cap, LV_ALIGN_BOTTOM_MID, 0, 0);
     return cont;
+}
+
+/* A customise action: these open a sheet rather than going anywhere, so they
+ * read as a separate, quieter tier under the destinations. */
+static lv_obj_t *glass_pill_button(lv_obj_t *parent, const char *symbol, const char *text,
+                                   lv_event_cb_t cb, void *user_data)
+{
+    lv_obj_t *pill = lv_obj_create(parent);
+    lv_obj_set_size(pill, 176, 38);
+    lv_obj_set_style_radius(pill, 19, 0);
+    lv_obj_set_style_bg_color(pill, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(pill, 1, 0);
+    lv_obj_set_style_border_color(pill, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(pill, LV_OPA_30, 0);
+    lv_obj_set_style_pad_all(pill, 0, 0);
+    lv_obj_clear_flag(pill, LV_OBJ_FLAG_SCROLLABLE);
+    if (cb) lv_obj_add_event_cb(pill, cb, LV_EVENT_CLICKED, user_data);
+
+    lv_obj_t *ic = glass_icon_symbol(pill, symbol, &lv_font_montserrat_16);
+    lv_obj_align(ic, LV_ALIGN_LEFT_MID, 16, 0);
+
+    lv_obj_t *l = glass_label(pill, text, &lv_font_montserrat_16, LV_OPA_COVER);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 44, 0);
+    return pill;
 }
 
 /* ---------------- stock widget styling ---------------- */
@@ -1398,34 +1432,62 @@ void glass_drawer_open(void)
     lv_obj_set_style_border_width(grab, 0, 0);
     lv_obj_clear_flag(grab, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *row = lv_obj_create(s_drawer_sheet);
-    lv_obj_set_size(row, sheet_w - 16, 90);
-    lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -10);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    lv_obj_set_style_pad_all(row, 0, 0);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
     const glass_screen_t k = s_host_kind;
+
+    /* Tier one: where you can go. Home is always here and always first; it
+     * used to give up its slot to Widgets on the home screen, so the first
+     * cell meant different things depending on where you already were. */
+    lv_obj_t *grid = lv_obj_create(s_drawer_sheet);
+    lv_obj_set_size(grid, GRID_W, 2 * CELL_H);
+    lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(grid, 0, 0);
+    lv_obj_set_style_pad_all(grid, 0, 0);
+    lv_obj_set_style_pad_row(grid, 0, 0);
+    lv_obj_set_style_pad_column(grid, 0, 0);
+    lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+
+    glass_grid_cell(grid, LV_SYMBOL_HOME,     NULL, "Home",     drawer_nav_cb, (void *) GLASS_SCREEN_HOME,     k == GLASS_SCREEN_HOME);
+    glass_grid_cell(grid, NULL, &cube_solid_full,   "Blocks",   drawer_nav_cb, (void *) GLASS_SCREEN_BLOCK,    k == GLASS_SCREEN_BLOCK);
+    glass_grid_cell(grid, NULL, &cubes_solid_full,  "Mempool",  drawer_nav_cb, (void *) GLASS_SCREEN_MEMPOOL,  k == GLASS_SCREEN_MEMPOOL);
+    glass_grid_cell(grid, NULL, &clock_solid_full,  "Clock",    drawer_nav_cb, (void *) GLASS_SCREEN_CLOCK,    k == GLASS_SCREEN_CLOCK);
+    glass_grid_cell(grid, "$",                NULL, "Price",    drawer_nav_cb, (void *) GLASS_SCREEN_PRICE,    k == GLASS_SCREEN_PRICE);
+    glass_grid_cell(grid, "%",                NULL, "Odds",     drawer_nav_cb, (void *) GLASS_SCREEN_ODDS,     k == GLASS_SCREEN_ODDS);
+    glass_grid_cell(grid, LV_SYMBOL_WIFI,     NULL, "Wi-Fi",    drawer_nav_cb, (void *) GLASS_SCREEN_WIFI,     k == GLASS_SCREEN_WIFI);
+    glass_grid_cell(grid, LV_SYMBOL_SETTINGS, NULL, "Settings", drawer_nav_cb, (void *) GLASS_SCREEN_SETTINGS, k == GLASS_SCREEN_SETTINGS);
+    glass_grid_cell(grid, LV_SYMBOL_EYE_OPEN, NULL, "Night",    drawer_nav_cb, (void *) GLASS_SCREEN_NIGHT,    k == GLASS_SCREEN_NIGHT);
+
+    /* Tier two: what you can change here. A rule and a heading, because these
+     * open a sheet over the screen you are on rather than taking you away. */
+    lv_obj_t *rule = lv_obj_create(s_drawer_sheet);
+    lv_obj_set_size(rule, GRID_W, 1);
+    lv_obj_align(rule, LV_ALIGN_TOP_MID, 0, 236);
+    lv_obj_set_style_bg_color(rule, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(rule, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(rule, 0, 0);
+    lv_obj_clear_flag(rule, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *heading = glass_label(s_drawer_sheet, "CUSTOMISE", &lv_font_montserrat_12, CAPTION_OPA);
+    lv_obj_align(heading, LV_ALIGN_TOP_LEFT, (SCREEN_WIDTH - 2 * DRAWER_MARGIN - GRID_W) / 2, 246);
+
+    lv_obj_t *actions = lv_obj_create(s_drawer_sheet);
+    lv_obj_set_size(actions, GRID_W, 44);
+    lv_obj_align(actions, LV_ALIGN_TOP_MID, 0, 262);
+    lv_obj_set_style_bg_opa(actions, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(actions, 0, 0);
+    lv_obj_set_style_pad_all(actions, 0, 0);
+    lv_obj_clear_flag(actions, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    /* Widgets only arranges the home surface, so it is offered only there. */
     if (k == GLASS_SCREEN_HOME) {
-        /* The surface's own controls come first on home; elsewhere Home takes
-         * that slot so the way back is always in the same place. */
-        glass_round_button(row, LV_SYMBOL_LIST,  NULL, "Widgets",   drawer_sheet_cb, (void *) GLASS_SHEET_WIDGETS, false);
-    } else {
-        glass_round_button(row, LV_SYMBOL_HOME,  NULL, "Home",      drawer_nav_cb, (void *) GLASS_SCREEN_HOME, false);
+        glass_pill_button(actions, LV_SYMBOL_LIST, "Widgets", drawer_sheet_cb, (void *) GLASS_SHEET_WIDGETS);
     }
-    glass_round_button(row, LV_SYMBOL_IMAGE,     NULL, "Style",     drawer_sheet_cb, (void *) GLASS_SHEET_WALLPAPER, false);
-    glass_round_button(row, NULL, &cube_solid_full,   "Blocks",    drawer_nav_cb, (void *) GLASS_SCREEN_BLOCK,    k == GLASS_SCREEN_BLOCK);
-    glass_round_button(row, NULL, &cubes_solid_full,  "Mempool",   drawer_nav_cb, (void *) GLASS_SCREEN_MEMPOOL,  k == GLASS_SCREEN_MEMPOOL);
-    glass_round_button(row, NULL, &clock_solid_full,  "Clock",     drawer_nav_cb, (void *) GLASS_SCREEN_CLOCK,    k == GLASS_SCREEN_CLOCK);
-    glass_round_button(row, "$",                 NULL, "Price",     drawer_nav_cb, (void *) GLASS_SCREEN_PRICE,    k == GLASS_SCREEN_PRICE);
-    glass_round_button(row, "%",                 NULL, "Odds",      drawer_nav_cb, (void *) GLASS_SCREEN_ODDS,     k == GLASS_SCREEN_ODDS);
-    glass_round_button(row, LV_SYMBOL_UPLOAD,    NULL, "Pool",      drawer_sheet_cb, (void *) GLASS_SHEET_POOL, false);
-    glass_round_button(row, LV_SYMBOL_WIFI,      NULL, "Wi-Fi",     drawer_nav_cb, (void *) GLASS_SCREEN_WIFI,     k == GLASS_SCREEN_WIFI);
-    glass_round_button(row, LV_SYMBOL_SETTINGS,  NULL, "Settings",  drawer_nav_cb, (void *) GLASS_SCREEN_SETTINGS, k == GLASS_SCREEN_SETTINGS);
-    glass_round_button(row, LV_SYMBOL_EYE_OPEN,  NULL, "Night",     drawer_nav_cb, (void *) GLASS_SCREEN_NIGHT,    k == GLASS_SCREEN_NIGHT);
+    glass_pill_button(actions, LV_SYMBOL_IMAGE,  "Style", drawer_sheet_cb, (void *) GLASS_SHEET_WALLPAPER);
+    glass_pill_button(actions, LV_SYMBOL_UPLOAD, "Pool",  drawer_sheet_cb, (void *) GLASS_SHEET_POOL);
 
     lv_obj_update_layout(s_host);
     drawer_slide(s_drawer_sheet, SCREEN_HEIGHT, SCREEN_HEIGHT - DRAWER_H - DRAWER_MARGIN, drawer_opened_cb);
