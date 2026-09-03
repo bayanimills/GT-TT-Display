@@ -30,6 +30,10 @@ typedef enum {
     GLASS_WIDGET_PRICE,
     GLASS_WIDGET_MEMPOOL,
     GLASS_WIDGET_CLOCK,
+    GLASS_WIDGET_HALVING,
+    /* The picker lays these out as two columns of six, so twelve is the most
+     * it can show. A thirteenth needs that grid reworked, not just an entry
+     * here. */
     GLASS_WIDGET_COUNT
 } glass_widget_t;
 

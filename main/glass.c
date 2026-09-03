@@ -14,6 +14,7 @@
 #include "settings.h"
 #include "night.h"
 #include "odds.h"
+#include "chain.h"
 #include "display_control.h"
 #include "esp_heap_caps.h"
 #include "custom_fonts.h"
@@ -177,7 +178,7 @@ static lv_img_dsc_t  s_thumb_dsc[3];
 
 static const char *k_widget_names[GLASS_WIDGET_COUNT] = {
     "Hashrate", "Temperature", "Power", "Shares", "Best difficulty", "Fan",
-    "Pool", "Block height", "BTC price", "Mempool", "Clock",
+    "Pool", "Block height", "BTC price", "Mempool", "Clock", "Halving",
 };
 
 /* Icon tint choices offered in the drawer. 0 means follow the palette. */
@@ -855,6 +856,7 @@ static const char *widget_icon_symbol(glass_widget_t id)
     case GLASS_WIDGET_SHARES: return LV_SYMBOL_OK;
     case GLASS_WIDGET_POOL:   return LV_SYMBOL_UPLOAD;
     case GLASS_WIDGET_PRICE:  return "$";
+    case GLASS_WIDGET_HALVING: return LV_SYMBOL_CUT;
     default:                  return LV_SYMBOL_DUMMY;
     }
 }
@@ -998,6 +1000,22 @@ static void card_refresh(card_t *c)
         set_if_changed(c->value, buf);
         set_if_changed(c->sub, buf2);
         break;
+
+    case GLASS_WIDGET_HALVING: {
+        /* Derived from the tip height, so this is exact once chain.c has
+         * seen one, and does not drift between fetches. */
+        const chain_data_t *d = chain_data();
+        if (d->blocks_to_halving > 0) {
+            chain_fmt_grouped(d->blocks_to_halving, buf, sizeof(buf));
+            set_if_changed(c->value, buf);
+            snprintf(buf2, sizeof(buf2), "%.0f days", d->days_to_halving);
+            set_if_changed(c->sub, buf2);
+        } else {
+            set_if_changed(c->value, "--");
+            set_if_changed(c->sub, "waiting for network");
+        }
+        break;
+    }
     default:
         break;
     }
@@ -1017,6 +1035,7 @@ static const char *widget_caption(glass_widget_t id)
     case GLASS_WIDGET_PRICE:       return "BTC / USD";
     case GLASS_WIDGET_MEMPOOL:     return "MEMPOOL  LATEST BLOCK";
     case GLASS_WIDGET_CLOCK:       return "TIME";
+    case GLASS_WIDGET_HALVING:     return "HALVING  BLOCKS LEFT";
     default:                       return "";
     }
 }
@@ -1026,7 +1045,8 @@ static bool widget_has_sub(glass_widget_t id)
     /* Power carries efficiency only when the hero is not already showing it. */
     if (id == GLASS_WIDGET_POWER) return !(s_mask & (1u << GLASS_WIDGET_HASHRATE));
     return id == GLASS_WIDGET_POOL || id == GLASS_WIDGET_PRICE ||
-           id == GLASS_WIDGET_MEMPOOL || id == GLASS_WIDGET_CLOCK;
+           id == GLASS_WIDGET_MEMPOOL || id == GLASS_WIDGET_CLOCK ||
+           id == GLASS_WIDGET_HALVING;
 }
 
 static void build_hero(card_t *c)
