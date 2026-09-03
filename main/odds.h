@@ -27,4 +27,6 @@ void odds_wifi_clicked(lv_event_t *e);
 void odds_settings_clicked(lv_event_t *e);
 void odds_night_clicked(lv_event_t *e);
 
+void odds_payout_clicked(lv_event_t * e);
+
 #endif /* ODDS_H */

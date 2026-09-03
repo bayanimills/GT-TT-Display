@@ -1,4 +1,5 @@
 #include "price.h"
+#include "payout.h"
 #include "odds.h"
 #include "chain.h"
 #include "home.h"
@@ -345,6 +346,7 @@ void price_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, price_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", NULL, true);
     create_bottom_nav_btn(bottom_nav, "%", price_odds_clicked, false);
+    create_bottom_nav_btn(bottom_nav, LV_SYMBOL_DOWNLOAD, price_payout_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, price_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, price_settings_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, price_night_clicked, false);
@@ -819,5 +821,12 @@ void price_odds_clicked(lv_event_t *e)
 {
     odds_screen_create();
     lv_scr_load(odds_get_screen());
+    price_screen_destroy();
+}
+
+void price_payout_clicked(lv_event_t *e)
+{
+    payout_screen_create();
+    lv_scr_load(payout_get_screen());
     price_screen_destroy();
 }

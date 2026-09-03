@@ -1,4 +1,5 @@
 #include "mempool.h"
+#include "payout.h"
 #include "odds.h"
 #include "chain.h"
 #include "custom_fonts.h"
@@ -218,6 +219,7 @@ void mempool_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, mempool_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", mempool_price_clicked, false);
     create_bottom_nav_btn(bottom_nav, "%", mempool_odds_clicked, false);
+    create_bottom_nav_btn(bottom_nav, LV_SYMBOL_DOWNLOAD, mempool_payout_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, mempool_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, mempool_settings_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, mempool_night_clicked, false);
@@ -1198,5 +1200,12 @@ void mempool_odds_clicked(lv_event_t *e)
 {
     odds_screen_create();
     lv_scr_load(odds_get_screen());
+    mempool_screen_destroy();
+}
+
+void mempool_payout_clicked(lv_event_t *e)
+{
+    payout_screen_create();
+    lv_scr_load(payout_get_screen());
     mempool_screen_destroy();
 }

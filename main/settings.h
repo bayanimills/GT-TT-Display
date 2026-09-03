@@ -49,4 +49,6 @@ void settings_odds_clicked(lv_event_t * e);
  * it exists so the simulator can put a control at a known position rather
  * than approximating with drags. */
 void settings_scroll_to(int y);
+void settings_payout_clicked(lv_event_t * e);
+
 #endif // SETTINGS_H

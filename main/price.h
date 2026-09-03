@@ -27,4 +27,6 @@ void price_odds_clicked(lv_event_t * e);
  * LVGL task. */
 void price_currency_changed(void);
 
+void price_payout_clicked(lv_event_t * e);
+
 #endif // PRICE_H

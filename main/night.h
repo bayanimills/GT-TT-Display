@@ -20,4 +20,6 @@ void night_settings_clicked(lv_event_t * e);
 
 void night_odds_clicked(lv_event_t * e);
 
+void night_payout_clicked(lv_event_t * e);
+
 #endif // NIGHT_H

@@ -22,4 +22,6 @@ void mempool_night_clicked(lv_event_t *e);
 
 void mempool_odds_clicked(lv_event_t * e);
 
+void mempool_payout_clicked(lv_event_t * e);
+
 #endif // MEMPOOL_H

@@ -1,4 +1,5 @@
 #include "block.h"
+#include "payout.h"
 #include "odds.h"
 #include "chain.h"
 #include "home.h"
@@ -102,6 +103,7 @@ void block_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, block_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", block_price_clicked, false);
     create_bottom_nav_btn(bottom_nav, "%", block_odds_clicked, false);
+    create_bottom_nav_btn(bottom_nav, LV_SYMBOL_DOWNLOAD, block_payout_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, block_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, block_settings_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, block_night_clicked, false);
@@ -376,5 +378,12 @@ void block_odds_clicked(lv_event_t *e)
 {
     odds_screen_create();
     lv_scr_load(odds_get_screen());
+    block_screen_destroy();
+}
+
+void block_payout_clicked(lv_event_t *e)
+{
+    payout_screen_create();
+    lv_scr_load(payout_get_screen());
     block_screen_destroy();
 }

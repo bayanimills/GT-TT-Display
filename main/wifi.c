@@ -1,4 +1,5 @@
 #include "wifi.h"
+#include "payout.h"
 #include "odds.h"
 #include "home.h"
 #include "bap.h"
@@ -791,6 +792,7 @@ void wifi_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, wifi_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", wifi_price_clicked, false);
     create_bottom_nav_btn(bottom_nav, "%", wifi_odds_clicked, false);
+    create_bottom_nav_btn(bottom_nav, LV_SYMBOL_DOWNLOAD, wifi_payout_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, NULL, true);  // WiFi is active
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, wifi_settings_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, wifi_night_clicked, false);
@@ -1156,5 +1158,12 @@ void wifi_odds_clicked(lv_event_t *e)
 {
     odds_screen_create();
     lv_scr_load(odds_get_screen());
+    wifi_screen_destroy();
+}
+
+void wifi_payout_clicked(lv_event_t *e)
+{
+    payout_screen_create();
+    lv_scr_load(payout_get_screen());
     wifi_screen_destroy();
 }

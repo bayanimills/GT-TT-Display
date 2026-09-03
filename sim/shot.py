@@ -25,7 +25,7 @@ PRESETS = [
     "Nord", "Gruvbox", "Paper (light)", "Mono",
 ]
 SCREENS = ["home", "night", "block", "clock", "price", "mempool", "wifi", "settings",
-           "odds"]
+           "odds", "payout"]
 
 def bap(param, value):
     """BAP RES sentence with a real XOR checksum -- the parser drops bad ones."""
@@ -51,7 +51,8 @@ WARMUP = [
     bap("block_height", "965167"),
     bap("pool", "public-pool.io"),
     bap("poolPort", "21496"),
-    bap("poolUser", "bc1qexample.worker"),
+    # BIP173's example address: real form, plainly documentation, nobody's.
+    bap("poolUser", "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker"),
     bap("wifi_ssid", "bitaxe-lab"),
     bap("wifi_rssi", "-58"),
     bap("wifi_ip", "192.168.1.50"),

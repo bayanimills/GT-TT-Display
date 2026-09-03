@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "payout.h"
 #include "odds.h"
 #include "chain.h"
 #include "home.h"
@@ -1221,6 +1222,7 @@ void settings_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, settings_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", settings_price_clicked, false);
     create_bottom_nav_btn(bottom_nav, "%", settings_odds_clicked, false);
+    create_bottom_nav_btn(bottom_nav, LV_SYMBOL_DOWNLOAD, settings_payout_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, settings_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, settings_diagnostics_handler, true);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, settings_night_clicked, false);
@@ -1529,5 +1531,12 @@ void settings_odds_clicked(lv_event_t *e)
 {
     odds_screen_create();
     lv_scr_load(odds_get_screen());
+    settings_screen_destroy();
+}
+
+void settings_payout_clicked(lv_event_t *e)
+{
+    payout_screen_create();
+    lv_scr_load(payout_get_screen());
     settings_screen_destroy();
 }

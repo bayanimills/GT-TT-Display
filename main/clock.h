@@ -17,4 +17,6 @@ void clock_night_clicked(lv_event_t *e);
 
 void clock_odds_clicked(lv_event_t * e);
 
+void clock_payout_clicked(lv_event_t * e);
+
 #endif // CLOCK_H

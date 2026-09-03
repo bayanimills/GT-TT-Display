@@ -14,6 +14,7 @@
 #include "settings.h"
 #include "night.h"
 #include "odds.h"
+#include "payout.h"
 #include "chain.h"
 #include "display_control.h"
 #include "esp_heap_caps.h"
@@ -1287,6 +1288,7 @@ static const nav_fns_t k_nav[GLASS_SCREEN_COUNT] = {
     { settings_screen_create, settings_get_screen, settings_screen_destroy },
     { night_screen_create,    night_get_screen,    night_screen_destroy    },
     { odds_screen_create,     odds_get_screen,     odds_screen_destroy     },
+    { payout_screen_create,   payout_get_screen,   payout_screen_destroy   },
 };
 
 /* Same order as every classic handler: build the next screen, load it, then
@@ -1467,6 +1469,7 @@ void glass_drawer_open(void)
     glass_grid_cell(grid, NULL, &clock_solid_full,  "Clock",    drawer_nav_cb, (void *) GLASS_SCREEN_CLOCK,    k == GLASS_SCREEN_CLOCK);
     glass_grid_cell(grid, "$",                NULL, "Price",    drawer_nav_cb, (void *) GLASS_SCREEN_PRICE,    k == GLASS_SCREEN_PRICE);
     glass_grid_cell(grid, "%",                NULL, "Odds",     drawer_nav_cb, (void *) GLASS_SCREEN_ODDS,     k == GLASS_SCREEN_ODDS);
+    glass_grid_cell(grid, LV_SYMBOL_DOWNLOAD, NULL, "Payout",   drawer_nav_cb, (void *) GLASS_SCREEN_PAYOUT,   k == GLASS_SCREEN_PAYOUT);
     glass_grid_cell(grid, LV_SYMBOL_WIFI,     NULL, "Wi-Fi",    drawer_nav_cb, (void *) GLASS_SCREEN_WIFI,     k == GLASS_SCREEN_WIFI);
     glass_grid_cell(grid, LV_SYMBOL_SETTINGS, NULL, "Settings", drawer_nav_cb, (void *) GLASS_SCREEN_SETTINGS, k == GLASS_SCREEN_SETTINGS);
     glass_grid_cell(grid, LV_SYMBOL_EYE_OPEN, NULL, "Night",    drawer_nav_cb, (void *) GLASS_SCREEN_NIGHT,    k == GLASS_SCREEN_NIGHT);

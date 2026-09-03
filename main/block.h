@@ -21,4 +21,6 @@ void block_night_clicked(lv_event_t *e);
 
 void block_odds_clicked(lv_event_t * e);
 
+void block_payout_clicked(lv_event_t * e);
+
 #endif // BLOCK_H

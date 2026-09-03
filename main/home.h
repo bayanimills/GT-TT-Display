@@ -85,4 +85,6 @@ void home_mempool_clicked(lv_event_t * e);
 
 void home_odds_clicked(lv_event_t * e);
 
+void home_payout_clicked(lv_event_t * e);
+
 #endif // HOME_H

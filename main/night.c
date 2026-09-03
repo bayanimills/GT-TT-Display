@@ -1,4 +1,5 @@
 #include "night.h"
+#include "payout.h"
 #include "odds.h"
 #include "home.h"
 #include "settings.h"
@@ -335,6 +336,7 @@ static void create_bottom_nav(void)
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, night_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", night_price_clicked, false);
     create_bottom_nav_btn(bottom_nav, "%", night_odds_clicked, false);
+    create_bottom_nav_btn(bottom_nav, LV_SYMBOL_DOWNLOAD, night_payout_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, night_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, night_settings_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, NULL, true);
@@ -445,5 +447,12 @@ void night_odds_clicked(lv_event_t *e)
 {
     odds_screen_create();
     lv_scr_load(odds_get_screen());
+    night_screen_destroy();
+}
+
+void night_payout_clicked(lv_event_t *e)
+{
+    payout_screen_create();
+    lv_scr_load(payout_get_screen());
     night_screen_destroy();
 }

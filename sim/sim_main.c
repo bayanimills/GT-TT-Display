@@ -47,6 +47,7 @@
 #include "wifi.h"
 #include "settings.h"
 #include "odds.h"
+#include "payout.h"
 #include "chain.h"
 #include "loading.h"
 #include "bap_parser.h"
@@ -139,6 +140,7 @@ static const sim_screen_t k_screens[] = {
     { "wifi",     wifi_screen_create,     wifi_screen_destroy,     wifi_get_screen     },
     { "settings", settings_screen_create, settings_screen_destroy, settings_get_screen },
     { "odds",     odds_screen_create,     odds_screen_destroy,     odds_get_screen     },
+    { "payout",   payout_screen_create,   payout_screen_destroy,   payout_get_screen   },
 };
 #define SCREEN_COUNT ((int) (sizeof(k_screens) / sizeof(k_screens[0])))
 
