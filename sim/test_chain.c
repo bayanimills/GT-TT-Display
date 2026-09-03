@@ -13,10 +13,12 @@
 #include <assert.h>
 #include <stdio.h>
 
-/* The publish path takes the LVGL lock. Nothing here runs a UI, so stand in
- * for it rather than dragging sim_main.c (and its own main) into the link. */
+/* Nothing here runs a UI or fetches: the publish path takes the LVGL lock and
+ * chain.c now guards on the netif and the radio, so stand these in rather than
+ * dragging sim_main.c (and its own main) and wifi.c into the link. */
 bool lvgl_port_lock(int timeout_ms) { (void)timeout_ms; return true; }
 void lvgl_port_unlock(void) {}
+bool wifi_is_connected(void) { return true; }
 
 static int failures = 0;
 
