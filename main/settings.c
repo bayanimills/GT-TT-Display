@@ -643,6 +643,10 @@ static void settings_currency_changed(lv_event_t *e)
 
 void settings_rebuild_for_theme(void)
 {
+    /* A palette or skin change invalidates every cached screen, not just
+     * this one: they baked the old colours in at construction. */
+    glass_screens_forget();
+
     if (settings_screen == NULL) {
         return;
     }

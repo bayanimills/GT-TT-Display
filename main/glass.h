@@ -129,6 +129,16 @@ void glass_pill_label(lv_obj_t *label, bool accent);
  * the wallpaper finishes rendering off the LVGL task. */
 void glass_rebuild_host(void);
 
+/* Drop every cached screen except the one on display. Anything cached was
+ * built with the palette, skin and wallpaper in force at the time, so it
+ * must not simply be shown again after any of those change. */
+void glass_screens_forget(void);
+
+/* Navigate exactly as the drawer does, cache and all. Exposed so the
+ * simulator exercises the real path rather than a copy of it that can
+ * drift: a benchmark that reimplements navigation measures the copy. */
+void glass_goto(glass_screen_t target);
+
 /* Restyle stock widgets for the material. */
 void glass_style_button(lv_obj_t *btn, bool filled);
 void glass_style_dropdown(lv_obj_t *dd);

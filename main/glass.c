@@ -131,6 +131,32 @@ typedef struct {
  * previous is destroyed, so the host is tracked explicitly. */
 static lv_obj_t      *s_host      = NULL;
 static glass_screen_t s_host_kind = GLASS_SCREEN_HOME;
+
+/* Screens are kept after you navigate away from them.
+ *
+ * Every screen_create() already returns early when its screen exists, so
+ * caching is mostly a matter of not tearing the old one down: the next visit
+ * becomes an lv_scr_load() and little else. That is the whole of the CPU
+ * spike on a screen change, which measures about twice a classic screen
+ * because each glass pane is four composited layers to rebuild.
+ *
+ * The catch is that glass_screen_create() also sets the host state every
+ * drawer, crop and power button reads, and a create that no-ops sets none of
+ * it. So each screen records what it established, and a cached visit adopts
+ * that back rather than leaving the previous screen s state in place. */
+typedef struct {
+    lv_obj_t *scr;
+    lv_obj_t *wall;
+    bool      dim;
+} host_rec_t;
+
+static host_rec_t s_hosts[GLASS_SCREEN_COUNT];
+
+/* Bounded, or a tour of every screen pins them all in memory. The screen on
+ * display is never evicted. */
+#define SCREEN_CACHE_MAX 4
+static glass_screen_t s_mru[GLASS_SCREEN_COUNT];
+static int            s_mru_n = 0;
 static bool           s_host_dim  = false;
 static lv_obj_t      *s_host_wall = NULL;
 static int            s_host_wall_index = -1;   /* wallpaper the host was built with */
@@ -297,6 +323,7 @@ bool glass_active(void) { return theme_get_skin() == THEME_SKIN_GLASS; }
 
 void glass_set_widget_mask(uint32_t mask)
 {
+    glass_screens_forget();
     prefs_load();
     s_mask = mask & ((1u << GLASS_WIDGET_COUNT) - 1);
     prefs_save();
@@ -305,6 +332,7 @@ void glass_set_widget_mask(uint32_t mask)
 
 void glass_set_layout(glass_layout_t layout)
 {
+    glass_screens_forget();
     prefs_load();
     if (layout < 0 || layout >= GLASS_LAYOUT_COUNT) return;
     s_layout = layout;
@@ -338,6 +366,7 @@ static void wallpaper_ready_cb(bool ok)
 
 void glass_set_wallpaper(int index)
 {
+    glass_screens_forget();
     prefs_load();
     if (index < 0 || index >= wallpaper_count()) return;
     s_wall = index;
@@ -1369,14 +1398,80 @@ static const nav_fns_t k_nav[GLASS_SCREEN_COUNT] = {
 /* Same order as every classic handler: build the next screen, load it, then
  * tear down the one we came from. Deleting the loaded screen first would leave
  * LVGL's active-screen pointer dangling. */
+/* Re-point the host state at a screen that already exists, which is what a
+ * create that no-opped skipped. */
+static void glass_adopt_host(glass_screen_t kind)
+{
+    const host_rec_t *rec = &s_hosts[kind];
+    if (!rec->scr) return;
+
+    s_host      = rec->scr;
+    s_host_kind = kind;
+    s_host_dim  = rec->dim;
+    s_host_wall = rec->wall;
+    display_control_set_power_button_dim(rec->dim);
+    display_control_refresh_skin();
+}
+
+static void cache_touch(glass_screen_t k)
+{
+    int at = -1;
+    for (int i = 0; i < s_mru_n; i++) if (s_mru[i] == k) { at = i; break; }
+    if (at >= 0) {
+        for (int i = at; i > 0; i--) s_mru[i] = s_mru[i - 1];
+    } else {
+        if (s_mru_n < GLASS_SCREEN_COUNT) s_mru_n++;
+        for (int i = s_mru_n - 1; i > 0; i--) s_mru[i] = s_mru[i - 1];
+    }
+    s_mru[0] = k;
+}
+
+/* Tear down anything past the cache bound, oldest first, never the one on
+ * display. */
+static void cache_evict(void)
+{
+    while (s_mru_n > SCREEN_CACHE_MAX) {
+        glass_screen_t victim = s_mru[s_mru_n - 1];
+        s_mru_n--;
+        if (victim == s_host_kind) continue;
+        k_nav[victim].destroy();
+        s_hosts[victim] = (host_rec_t){ 0 };
+    }
+}
+
+void glass_screens_forget(void)
+{
+    /* Anything cached was built with the old palette, skin or wallpaper, so
+     * it cannot simply be shown again. The one on display is left alone; its
+     * owner rebuilds it. */
+    for (int i = 0; i < GLASS_SCREEN_COUNT; i++) {
+        if (i == (int) s_host_kind) continue;
+        if (s_hosts[i].scr) {
+            k_nav[i].destroy();
+            s_hosts[i] = (host_rec_t){ 0 };
+        }
+    }
+    s_mru_n = 0;
+    cache_touch(s_host_kind);
+}
+
+static void glass_navigate(glass_screen_t target);
+
+void glass_goto(glass_screen_t target) { glass_navigate(target); }
+
 static void glass_navigate(glass_screen_t target)
 {
     if (target < 0 || target >= GLASS_SCREEN_COUNT) return;
-    glass_screen_t from = s_host_kind;
-    if (target == from) { glass_drawer_close(); return; }
+    if (target == s_host_kind) { glass_drawer_close(); return; }
+
+    /* create() is a no-op when the screen survives from a previous visit, in
+     * which case the host state it would have set has to be adopted back. */
     k_nav[target].create();
+    glass_adopt_host(target);
     lv_scr_load(k_nav[target].get());
-    k_nav[from].destroy();
+
+    cache_touch(target);
+    cache_evict();
 }
 
 /* ---------------- drawer ---------------- */
@@ -2065,6 +2160,8 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
     s_host_kind = kind;
     s_host_dim  = dim;
     s_host_wall = NULL;
+
+    s_hosts[kind] = (host_rec_t){ .scr = scr, .wall = NULL, .dim = dim };
     display_control_set_power_button_dim(dim);
     display_control_refresh_skin();
 
@@ -2072,6 +2169,7 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
     if (sharp) {
         s_host_wall = lv_img_create(scr);
         lv_img_set_src(s_host_wall, sharp);
+        s_hosts[kind].wall = s_host_wall;
         lv_obj_set_pos(s_host_wall, 0, 0);
         /* Night: the wallpaper is structure, not light. */
         if (dim) lv_obj_set_style_img_opa(s_host_wall, LV_OPA_20, 0);
@@ -2108,6 +2206,12 @@ void glass_rebuild_host(void)
 
 void glass_screen_detach(lv_obj_t *scr)
 {
+    /* Forget the cached host state for whichever screen this is, so a later
+     * visit rebuilds instead of adopting a freed object. */
+    for (int i = 0; i < GLASS_SCREEN_COUNT; i++) {
+        if (s_hosts[i].scr == scr) s_hosts[i] = (host_rec_t){ 0 };
+    }
+
     if (!scr) return;
     if (s_drawer_host == scr) drawer_reset();
     if (s_sheet_host == scr)  sheet_reset();

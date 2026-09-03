@@ -130,19 +130,20 @@ typedef struct {
     void      (*create)(void);
     void      (*destroy)(void);
     lv_obj_t *(*get)(void);
+    glass_screen_t kind;   /* so the sim can use the real navigation */
 } sim_screen_t;
 
 static const sim_screen_t k_screens[] = {
-    { "home",     home_screen_create,     home_screen_destroy,     home_get_screen     },
-    { "night",    night_screen_create,    night_screen_destroy,    night_get_screen    },
-    { "block",    block_screen_create,    block_screen_destroy,    block_get_screen    },
-    { "clock",    clock_screen_create,    clock_screen_destroy,    clock_get_screen    },
-    { "price",    price_screen_create,    price_screen_destroy,    price_get_screen    },
-    { "mempool",  mempool_screen_create,  mempool_screen_destroy,  mempool_get_screen  },
-    { "wifi",     wifi_screen_create,     wifi_screen_destroy,     wifi_get_screen     },
-    { "settings", settings_screen_create, settings_screen_destroy, settings_get_screen },
-    { "odds",     odds_screen_create,     odds_screen_destroy,     odds_get_screen     },
-    { "payout",   payout_screen_create,   payout_screen_destroy,   payout_get_screen   },
+    { "home", home_screen_create, home_screen_destroy, home_get_screen, GLASS_SCREEN_HOME },
+    { "night", night_screen_create, night_screen_destroy, night_get_screen, GLASS_SCREEN_NIGHT },
+    { "block", block_screen_create, block_screen_destroy, block_get_screen, GLASS_SCREEN_BLOCK },
+    { "clock", clock_screen_create, clock_screen_destroy, clock_get_screen, GLASS_SCREEN_CLOCK },
+    { "price", price_screen_create, price_screen_destroy, price_get_screen, GLASS_SCREEN_PRICE },
+    { "mempool", mempool_screen_create, mempool_screen_destroy, mempool_get_screen, GLASS_SCREEN_MEMPOOL },
+    { "wifi", wifi_screen_create, wifi_screen_destroy, wifi_get_screen, GLASS_SCREEN_WIFI },
+    { "settings", settings_screen_create, settings_screen_destroy, settings_get_screen, GLASS_SCREEN_SETTINGS },
+    { "odds", odds_screen_create, odds_screen_destroy, odds_get_screen, GLASS_SCREEN_ODDS },
+    { "payout", payout_screen_create, payout_screen_destroy, payout_get_screen, GLASS_SCREEN_PAYOUT },
 };
 #define SCREEN_COUNT ((int) (sizeof(k_screens) / sizeof(k_screens[0])))
 
@@ -179,6 +180,19 @@ static void sim_goto(int idx)
 {
     if (idx < 0 || idx >= SCREEN_COUNT) return;
     int cur = active_screen_index();
+
+    /* Under Glass, go through the firmware own navigation so this exercises
+     * the real path, cache and all. Reimplementing it here measured the copy
+     * rather than the thing, and reported no gain from a cache it had in fact
+     * never reached. */
+    if (glass_active() && cur >= 0) {
+        glass_goto(k_screens[idx].kind);
+        lv_obj_invalidate(lv_scr_act());
+        s_dirty = true;
+        report_mem(k_screens[idx].name);
+        return;
+    }
+
     k_screens[idx].create();
     lv_scr_load(k_screens[idx].get());
     if (cur >= 0 && cur != idx) k_screens[cur].destroy();
