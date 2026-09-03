@@ -233,6 +233,26 @@ void chain_set_watch_address(const char *addr)
     }
 }
 
+void chain_fmt_compact(double v, char *buf, size_t n)
+{
+    static const char *suffix[] = { "", "K", "M", "B", "T", "P", "E" };
+    int tier = 0;
+
+    if (!isfinite(v) || v <= 0.0)
+    {
+        snprintf(buf, n, "--");
+        return;
+    }
+    while (v >= 1000.0 && tier < 6)
+    {
+        v /= 1000.0;
+        tier++;
+    }
+    if (v >= 100.0)     { snprintf(buf, n, "%.0f%s", v, suffix[tier]); }
+    else if (v >= 10.0) { snprintf(buf, n, "%.1f%s", v, suffix[tier]); }
+    else                { snprintf(buf, n, "%.2f%s", v, suffix[tier]); }
+}
+
 void chain_fmt_grouped(long v, char *buf, size_t n)
 {
     if (!buf || n == 0)

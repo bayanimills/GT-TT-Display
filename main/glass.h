@@ -31,9 +31,9 @@ typedef enum {
     GLASS_WIDGET_MEMPOOL,
     GLASS_WIDGET_CLOCK,
     GLASS_WIDGET_HALVING,
-    /* The picker lays these out as two columns of six, so twelve is the most
-     * it can show. A thirteenth needs that grid reworked, not just an entry
-     * here. */
+    GLASS_WIDGET_ODDS,
+    /* The picker splits these over two scrolling columns, so adding one here
+     * is enough; it no longer caps at what fits on the sheet. */
     GLASS_WIDGET_COUNT
 } glass_widget_t;
 

@@ -165,4 +165,9 @@ bool chain_expected_sats_per_day(double hashrate_ghs, double *sats);
  * six-digit run makes the reader count digits. */
 void chain_fmt_grouped(long v, char *buf, size_t n);
 
+/* 2910000 -> "2.91M". Three significant figures, because the inputs move
+ * by more than that between fetches. Shared for the same reason as the
+ * grouped formatter: more than one screen shows these magnitudes. */
+void chain_fmt_compact(double v, char *buf, size_t n);
+
 #endif /* CHAIN_H */

@@ -29,37 +29,6 @@ static lv_timer_t *odds_timer = NULL;
 static lv_obj_t *create_bottom_nav_btn(lv_obj_t *parent, const char *symbol, lv_event_cb_t event_cb, bool active);
 static lv_obj_t *create_bottom_nav_btn_img(lv_obj_t *parent, const lv_img_dsc_t *img_dsc, lv_event_cb_t event_cb, bool active);
 
-/* 2_910_000 -> "2.91M". Three significant figures is as much as any of these
- * numbers deserves: the inputs move by more than that between fetches. */
-static void fmt_compact(double v, char *buf, size_t n)
-{
-    static const char *suffix[] = { "", "K", "M", "B", "T", "P", "E" };
-    int tier = 0;
-
-    if (!isfinite(v) || v <= 0.0)
-    {
-        snprintf(buf, n, "--");
-        return;
-    }
-    while (v >= 1000.0 && tier < 6)
-    {
-        v /= 1000.0;
-        tier++;
-    }
-    if (v >= 100.0)
-    {
-        snprintf(buf, n, "%.0f%s", v, suffix[tier]);
-    }
-    else if (v >= 10.0)
-    {
-        snprintf(buf, n, "%.1f%s", v, suffix[tier]);
-    }
-    else
-    {
-        snprintf(buf, n, "%.2f%s", v, suffix[tier]);
-    }
-}
-
 /* An expected wait, in whatever unit keeps it readable. Solo on a Bitaxe this
  * is nearly always years, but the same screen has to stay sane for someone
  * pointing a shelf of miners at it. */
@@ -103,7 +72,7 @@ static void fmt_wait(double seconds, char *buf, size_t n)
         /* Past a million years the digits stop meaning anything; a magnitude
          * is the honest presentation. */
         char compact[16];
-        fmt_compact(years, compact, sizeof(compact));
+        chain_fmt_compact(years, compact, sizeof(compact));
         snprintf(buf, n, "%s yrs", compact);
     }
 }
@@ -157,7 +126,7 @@ void odds_refresh(void)
     if (chain_solo_odds(ghs, &expected, &per_day, &per_year))
     {
         char compact[16];
-        fmt_compact(1.0 / per_day, compact, sizeof(compact));
+        chain_fmt_compact(1.0 / per_day, compact, sizeof(compact));
         snprintf(buf, sizeof(buf), "1 in %s", compact);
         odds_set(odds_hero_label, buf);
         odds_set(odds_hero_caption, "CHANCE OF A BLOCK, PER DAY");
@@ -165,7 +134,7 @@ void odds_refresh(void)
         fmt_wait(expected, buf, sizeof(buf));
         odds_set(odds_stat_value[0], buf);
 
-        fmt_compact(d->difficulty, buf, sizeof(buf));
+        chain_fmt_compact(d->difficulty, buf, sizeof(buf));
         odds_set(odds_stat_value[1], buf);
 
         /* Third cell: what the same hashrate would be worth on a pool. It is

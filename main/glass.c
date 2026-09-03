@@ -188,6 +188,7 @@ static lv_img_dsc_t  s_thumb_dsc[3];
 static const char *k_widget_names[GLASS_WIDGET_COUNT] = {
     "Hashrate", "Temperature", "Power", "Shares", "Best difficulty", "Fan",
     "Pool", "Block height", "BTC price", "Mempool", "Clock", "Halving",
+    "Solo odds",
 };
 
 /* Icon tint choices offered in the drawer. 0 means follow the palette. */
@@ -919,6 +920,7 @@ static const char *widget_icon_symbol(glass_widget_t id)
     case GLASS_WIDGET_POOL:   return LV_SYMBOL_UPLOAD;
     case GLASS_WIDGET_PRICE:  return "$";
     case GLASS_WIDGET_HALVING: return LV_SYMBOL_CUT;
+    case GLASS_WIDGET_ODDS:    return "%";
     default:                  return LV_SYMBOL_DUMMY;
     }
 }
@@ -1063,6 +1065,24 @@ static void card_refresh(card_t *c)
         set_if_changed(c->sub, buf2);
         break;
 
+    case GLASS_WIDGET_ODDS: {
+        /* The same figure the odds screen leads with, from the miner hashrate
+         * and the network difficulty, both of which are already to hand. */
+        double per_day = 0.0;
+        const double ghs = st->hashrate && st->hashrate[0] ? strtod(st->hashrate, NULL) : 0.0;
+        if (chain_solo_odds(ghs, NULL, &per_day, NULL) && per_day > 0.0) {
+            char compact[24];
+            chain_fmt_compact(1.0 / per_day, compact, sizeof(compact));
+            snprintf(buf, sizeof(buf), "1 in %s", compact);
+            set_if_changed(c->value, buf);
+            set_if_changed(c->sub, "chance of a block");
+        } else {
+            set_if_changed(c->value, "--");
+            set_if_changed(c->sub, ghs > 0.0 ? "waiting for network" : "waiting for miner");
+        }
+        break;
+    }
+
     case GLASS_WIDGET_HALVING: {
         /* Derived from the tip height, so this is exact once chain.c has
          * seen one, and does not drift between fetches. */
@@ -1098,6 +1118,7 @@ static const char *widget_caption(glass_widget_t id)
     case GLASS_WIDGET_MEMPOOL:     return "MEMPOOL  LATEST BLOCK";
     case GLASS_WIDGET_CLOCK:       return "TIME";
     case GLASS_WIDGET_HALVING:     return "HALVING  BLOCKS LEFT";
+    case GLASS_WIDGET_ODDS:        return "SOLO ODDS  PER DAY";
     default:                       return "";
     }
 }
@@ -1108,7 +1129,7 @@ static bool widget_has_sub(glass_widget_t id)
     if (id == GLASS_WIDGET_POWER) return !(s_mask & (1u << GLASS_WIDGET_HASHRATE));
     return id == GLASS_WIDGET_POOL || id == GLASS_WIDGET_PRICE ||
            id == GLASS_WIDGET_MEMPOOL || id == GLASS_WIDGET_CLOCK ||
-           id == GLASS_WIDGET_HALVING;
+           id == GLASS_WIDGET_HALVING || id == GLASS_WIDGET_ODDS;
 }
 
 static void build_hero(card_t *c)
@@ -1672,21 +1693,39 @@ static void build_widgets_sheet(void)
         lv_obj_center(l);
     }
 
-    /* Two columns in display order, six per column: name, move up/down, toggle. */
+    /* Two columns in display order: name, move up/down, toggle.
+     *
+     * The rows live in their own scroller rather than being placed straight on
+     * the sheet, which was a fixed two-by-six and so silently capped the widget
+     * list at twelve: a thirteenth landed in a third column past the edge. */
+    lv_obj_t *list = lv_obj_create(p);
+    lv_obj_set_size(list, 600, 336);
+    lv_obj_set_pos(list, 20, 64);
+    lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_bg_color(list, lv_color_white(), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(list, LV_OPA_40, LV_PART_SCROLLBAR);
+    lv_obj_set_style_width(list, 4, LV_PART_SCROLLBAR);
+
+    const int per_col = (GLASS_WIDGET_COUNT + 1) / 2;
+
     for (int pos = 0; pos < GLASS_WIDGET_COUNT; pos++) {
         int id = s_order[pos];
-        int col = pos / 6, row = pos % 6;
-        int x = 28 + col * 306, y = 70 + row * 54;
+        int col = pos / per_col, row = pos % per_col;
+        int x = 8 + col * 306, y = row * 54;
 
-        lv_obj_t *name = glass_label(p, k_widget_names[id], &lv_font_montserrat_16, LV_OPA_COVER);
+        lv_obj_t *name = glass_label(list, k_widget_names[id], &lv_font_montserrat_16, LV_OPA_COVER);
         lv_obj_set_width(name, 140);
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
         lv_obj_set_pos(name, x, y + 7);
 
-        small_round_button(p, LV_SYMBOL_UP,   x + 146, y, widget_move_cb, (void *) (intptr_t) ((pos << 1) | 0), pos > 0);
-        small_round_button(p, LV_SYMBOL_DOWN, x + 180, y, widget_move_cb, (void *) (intptr_t) ((pos << 1) | 1), pos < GLASS_WIDGET_COUNT - 1);
+        small_round_button(list, LV_SYMBOL_UP,   x + 146, y, widget_move_cb, (void *) (intptr_t) ((pos << 1) | 0), pos > 0);
+        small_round_button(list, LV_SYMBOL_DOWN, x + 180, y, widget_move_cb, (void *) (intptr_t) ((pos << 1) | 1), pos < GLASS_WIDGET_COUNT - 1);
 
-        lv_obj_t *sw = lv_switch_create(p);
+        lv_obj_t *sw = lv_switch_create(list);
         lv_obj_set_size(sw, 54, 30);
         lv_obj_set_pos(sw, x + 222, y);
         lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_MAIN);
