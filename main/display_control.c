@@ -168,6 +168,11 @@ esp_err_t display_control_set_config(const display_control_config_t *config)
     return result;
 }
 
+bool display_control_time_is_set(void)
+{
+    return time(NULL) >= VALID_TIME_EPOCH;
+}
+
 bool display_control_is_backlight_on(void)
 {
     return backlight_on;

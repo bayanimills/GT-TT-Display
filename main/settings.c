@@ -38,6 +38,8 @@ static lv_obj_t *timezone_dropdown = NULL;
 static lv_obj_t *data_source_dropdown = NULL;
 static lv_obj_t *currency_dropdown = NULL;
 static lv_obj_t *display_schedule_checkbox = NULL;
+static lv_obj_t *display_schedule_status = NULL;
+static lv_timer_t *display_schedule_timer = NULL;
 static lv_obj_t *display_off_dropdown = NULL;
 static lv_obj_t *display_on_dropdown = NULL;
 static lv_obj_t *display_corner_dropdown = NULL;
@@ -105,6 +107,8 @@ static const char *display_corner_options =
 #define SETTINGS_NVS_TZ_INDEX_KEY "tz_index"
 
 static void settings_display_schedule_changed(lv_event_t *e);
+static void settings_refresh_schedule_status(void);
+static void settings_schedule_timer_cb(lv_timer_t *t);
 
 static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
 {
@@ -127,9 +131,15 @@ static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
         lv_obj_set_style_radius(list, 8, LV_PART_MAIN);
         lv_obj_set_style_text_color(list, COLOR_TEXT_PRIMARY, LV_PART_MAIN);
         lv_obj_set_style_text_font(list, font, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(list, COLOR_ACCENT, LV_PART_SELECTED);
-        lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SELECTED);
-        lv_obj_set_style_text_color(list, COLOR_TEXT_ON_ACCENT, LV_PART_SELECTED);
+        /* The highlight is drawn from the list styled LV_PART_SELECTED with
+         * LV_STATE_CHECKED (lv_dropdown.c draw_box). A style set at the
+         * default state loses to the stock theme, which sets that part at the
+         * checked state and so wins on specificity: that is why the selected
+         * row stayed the theme blue whatever palette was chosen. Match the
+         * state and it applies. */
+        lv_obj_set_style_bg_color(list, COLOR_ACCENT, LV_PART_SELECTED | LV_STATE_CHECKED);
+        lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SELECTED | LV_STATE_CHECKED);
+        lv_obj_set_style_text_color(list, theme_ink_on(COLOR_ACCENT), LV_PART_SELECTED | LV_STATE_CHECKED);
         lv_obj_set_style_text_font(list, font, LV_PART_SELECTED);
     }
 }
@@ -776,11 +786,19 @@ void settings_screen_create(void)
 
     settings_main_cont = main_cont;
 
+    /* The sections used to carry a hardcoded absolute y and height each, so
+     * inserting one or growing one meant recomputing every offset below it by
+     * hand. They are now a flow column: a section states its own height and
+     * the order it appears in, and nothing else has to know. */
+    lv_obj_set_flex_flow(main_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(main_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(main_cont, 14, 0);
+
     lv_obj_t *title_label = lv_label_create(main_cont);
     lv_label_set_text(title_label, "SETTINGS");
     lv_obj_set_style_text_color(title_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_28, 0);
-    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 6);
     if (glass)
     {
         lv_obj_add_flag(title_label, LV_OBJ_FLAG_CLICKABLE);
@@ -789,7 +807,6 @@ void settings_screen_create(void)
 
     lv_obj_t *perf_section = lv_obj_create(main_cont);
     lv_obj_set_size(perf_section, 680, 110);
-    lv_obj_align(perf_section, LV_ALIGN_TOP_MID, 0, 46);
     lv_obj_set_style_bg_opa(perf_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(perf_section, 0, 0);
     lv_obj_set_style_pad_all(perf_section, 10, 0);
@@ -821,7 +838,6 @@ void settings_screen_create(void)
 
     lv_obj_t *fan_section = lv_obj_create(main_cont);
     lv_obj_set_size(fan_section, 680, 200);
-    lv_obj_align(fan_section, LV_ALIGN_TOP_MID, 0, 160);
     lv_obj_set_style_bg_opa(fan_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(fan_section, 0, 0);
     lv_obj_set_style_pad_all(fan_section, 10, 0);
@@ -870,7 +886,6 @@ void settings_screen_create(void)
 
     lv_obj_t *brightness_section = lv_obj_create(main_cont);
     lv_obj_set_size(brightness_section, 680, 70);
-    lv_obj_align(brightness_section, LV_ALIGN_TOP_MID, 0, 350);
     lv_obj_set_style_bg_opa(brightness_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(brightness_section, 0, 0);
     lv_obj_set_style_pad_all(brightness_section, 10, 0);
@@ -904,7 +919,6 @@ void settings_screen_create(void)
 
     lv_obj_t *theme_section = lv_obj_create(main_cont);
     lv_obj_set_size(theme_section, 680, 110);
-    lv_obj_align(theme_section, LV_ALIGN_TOP_MID, 0, 430);
     lv_obj_set_style_bg_opa(theme_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(theme_section, 0, 0);
     lv_obj_set_style_pad_all(theme_section, 10, 0);
@@ -984,7 +998,6 @@ void settings_screen_create(void)
 
     lv_obj_t *timezone_section = lv_obj_create(main_cont);
     lv_obj_set_size(timezone_section, 680, 50);
-    lv_obj_align(timezone_section, LV_ALIGN_TOP_MID, 0, 560);
     lv_obj_set_style_bg_opa(timezone_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(timezone_section, 0, 0);
     lv_obj_set_style_pad_all(timezone_section, 10, 0);
@@ -1012,7 +1025,6 @@ void settings_screen_create(void)
      * hashprice differs, and the odds screen says so when it is missing. */
     lv_obj_t *data_section = lv_obj_create(main_cont);
     lv_obj_set_size(data_section, 680, 50);
-    lv_obj_align(data_section, LV_ALIGN_TOP_MID, 0, 620);
     lv_obj_set_style_bg_opa(data_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(data_section, 0, 0);
     lv_obj_set_style_pad_all(data_section, 10, 0);
@@ -1053,8 +1065,7 @@ void settings_screen_create(void)
     display_control_get_config(&display_config);
 
     lv_obj_t *display_section = lv_obj_create(main_cont);
-    lv_obj_set_size(display_section, 680, 262);
-    lv_obj_align(display_section, LV_ALIGN_TOP_MID, 0, 690);
+    lv_obj_set_size(display_section, 680, 286);
     lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(display_section, 0, 0);
     lv_obj_set_style_pad_all(display_section, 10, 0);
@@ -1070,6 +1081,13 @@ void settings_screen_create(void)
     display_schedule_checkbox = settings_toggle_row(display_section,
                                                     "Turn the display off daily",
                                                     30, 660, 40, glass);
+
+    display_schedule_status = lv_label_create(display_section);
+    lv_obj_set_style_text_color(display_schedule_status, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(display_schedule_status, &lv_font_montserrat_14, 0);
+    lv_obj_align(display_schedule_status, LV_ALIGN_TOP_LEFT, 2, 72);
+
+    display_schedule_timer = lv_timer_create(settings_schedule_timer_cb, 2000, NULL);
     if (display_config.schedule_enabled) {
         lv_obj_add_state(display_schedule_checkbox, LV_STATE_CHECKED);
     }
@@ -1080,11 +1098,11 @@ void settings_screen_create(void)
     lv_label_set_text(off_label, "Turns off at");
     lv_obj_set_style_text_color(off_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(off_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 80);
+    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 104);
 
     display_off_dropdown = lv_dropdown_create(display_section);
     lv_obj_set_size(display_off_dropdown, 300, 36);
-    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 104);
+    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 128);
     lv_dropdown_set_options(display_off_dropdown, display_time_options);
     lv_dropdown_set_selected(display_off_dropdown, display_config.off_minute / 30U);
     style_settings_dropdown(display_off_dropdown, &lv_font_montserrat_14);
@@ -1095,11 +1113,11 @@ void settings_screen_create(void)
     lv_label_set_text(on_label, "Turns on at");
     lv_obj_set_style_text_color(on_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(on_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 80);
+    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 104);
 
     display_on_dropdown = lv_dropdown_create(display_section);
     lv_obj_set_size(display_on_dropdown, 300, 36);
-    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 104);
+    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 128);
     lv_dropdown_set_options(display_on_dropdown, display_time_options);
     lv_dropdown_set_selected(display_on_dropdown, display_config.on_minute / 30U);
     style_settings_dropdown(display_on_dropdown, &lv_font_montserrat_14);
@@ -1110,11 +1128,11 @@ void settings_screen_create(void)
     lv_label_set_text(corner_label, "Display-off button");
     lv_obj_set_style_text_color(corner_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(corner_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 152);
+    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 176);
 
     display_corner_dropdown = lv_dropdown_create(display_section);
     lv_obj_set_size(display_corner_dropdown, 300, 36);
-    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 176);
+    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 200);
     lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
     lv_dropdown_set_selected(display_corner_dropdown,
                              (uint16_t)display_button_mode_from_config(
@@ -1130,12 +1148,11 @@ void settings_screen_create(void)
     lv_obj_set_style_text_font(display_button_mode_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_width(display_button_mode_hint, 650);
     lv_label_set_long_mode(display_button_mode_hint, LV_LABEL_LONG_WRAP);
-    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 220);
+    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 244);
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
     lv_obj_set_size(ota_section, 680, 160);
-    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 962);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -1211,6 +1228,11 @@ void settings_screen_create(void)
 
 void settings_screen_destroy(void)
 {
+    if (display_schedule_timer) {
+        lv_timer_del(display_schedule_timer);
+        display_schedule_timer = NULL;
+    }
+    display_schedule_status = NULL;
     settings_main_cont = NULL;
     // Clean up Easter egg overlay if showing
     if (sys_overlay) {
@@ -1252,6 +1274,37 @@ void settings_screen_destroy(void)
     }
 
     display_control_set_power_button_visible(true);
+}
+
+/* Say what the schedule is actually doing.
+ *
+ * display_control_evaluate() returns early until the clock is set, so
+ * switching this on before SNTP has answered saved the setting and changed
+ * nothing on screen, with no way to tell that from a broken control. */
+static void settings_refresh_schedule_status(void)
+{
+    if (!display_schedule_status || !display_schedule_checkbox) {
+        return;
+    }
+
+    if (!lv_obj_has_state(display_schedule_checkbox, LV_STATE_CHECKED)) {
+        lv_label_set_text(display_schedule_status, "The display stays on all day");
+        return;
+    }
+    if (!display_control_time_is_set()) {
+        lv_label_set_text(display_schedule_status,
+                          "Waiting for network time before this can take effect");
+        return;
+    }
+    lv_label_set_text(display_schedule_status,
+                      display_control_is_backlight_on() ? "Active: the display is on now"
+                                                        : "Active: the display is off now");
+}
+
+static void settings_schedule_timer_cb(lv_timer_t *t)
+{
+    (void) t;
+    settings_refresh_schedule_status();
 }
 
 void settings_scroll_to(int y)
@@ -1458,6 +1511,7 @@ static void settings_display_schedule_changed(lv_event_t *e)
     };
 
     esp_err_t err = display_control_set_config(&config);
+    settings_refresh_schedule_status();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save display schedule: %s", esp_err_to_name(err));
     }

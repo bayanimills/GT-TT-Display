@@ -41,4 +41,8 @@ bool display_control_handle_touch_wake(void);
  * sits below LVGL, which is why it wins over every on-screen tap consumer
  * (the Glass drawer, the Wi-Fi keyboard) without coordinating with them. */
 bool display_control_filter_touch(bool pressed);
-void display_control_turn_off(void);
+void display_control_turn_off(void);/* False until the clock has been set, which on this board means SNTP has
+ * answered. The schedule cannot be judged before then, so anything that
+ * offers it has to say so rather than appearing to do nothing. */
+bool display_control_time_is_set(void);
+
