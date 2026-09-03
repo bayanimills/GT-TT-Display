@@ -34,7 +34,10 @@ static uint32_t s_active[THEME_SLOT_COUNT];
 static int      s_index      = 0;
 static bool     s_custom     = false;
 static bool     s_ready      = false;
-static theme_skin_t s_skin   = THEME_SKIN_CLASSIC;
+/* Glass is what the display is designed around now, so a fresh device boots
+ * into it. Classic remains selectable and is the fallback until Glass has
+ * been proven on a panel. */
+static theme_skin_t s_skin   = THEME_SKIN_GLASS;
 static uint32_t s_icon_override = 0;
 static void   (*s_reload_cb)(void) = NULL;
 

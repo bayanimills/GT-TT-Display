@@ -585,6 +585,12 @@ static lv_obj_t *glass_panel_create(lv_obj_t *parent, int w, int h, int radius)
         lv_obj_set_size(frost, w, h);
         lv_obj_set_pos(frost, 0, 0);
         lv_obj_clear_flag(frost, LV_OBJ_FLAG_CLICKABLE);
+    } else {
+        /* No wallpaper, so there is nothing to sample a material from and
+         * nothing behind the pane worth showing. Make it a solid surface:
+         * left translucent, the screen underneath reads straight through the
+         * captions, which is what a board without PSRAM would show. */
+        lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
     }
 
     /* Tint: the material itself. Colour and opacity are set by frost_sync()
@@ -599,7 +605,13 @@ static lv_obj_t *glass_panel_create(lv_obj_t *parent, int w, int h, int radius)
     lv_obj_set_style_pad_all(tint, 0, 0);
     lv_obj_clear_flag(tint, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    register_frost(panel, frost, tint, dim);
+    if (frost) {
+        register_frost(panel, frost, tint, dim);
+    } else {
+        /* Not registered, so frost_sync() leaves the tint alone rather than
+         * deriving an opacity from a wallpaper that does not exist. */
+        lv_obj_set_style_bg_opa(tint, LV_OPA_TRANSP, 0);
+    }
 
     /* Specular edge: a 1px brighter line along the top, the cue that light
      * is catching the upper rim of a slab of glass. */
