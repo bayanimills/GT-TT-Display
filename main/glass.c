@@ -825,6 +825,21 @@ void glass_style_checkbox(lv_obj_t *cb)
     lv_obj_set_style_border_opa(cb, LV_OPA_TRANSP, LV_PART_INDICATOR | LV_STATE_CHECKED);
 }
 
+/* The switch that replaced the settings checkboxes: an unlit track reads as
+ * frosted glass, a lit one as the accent. */
+void glass_style_switch(lv_obj_t *sw)
+{
+    lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_20, LV_PART_MAIN);
+    lv_obj_set_style_border_color(sw, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(sw, LV_OPA_40, LV_PART_MAIN);
+    lv_obj_set_style_border_width(sw, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, COLOR_ACCENT, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
+}
+
 void glass_style_bar(lv_obj_t *bar)
 {
     lv_obj_set_style_bg_color(bar, lv_color_white(), LV_PART_MAIN);

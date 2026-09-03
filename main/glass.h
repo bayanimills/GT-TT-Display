@@ -135,6 +135,7 @@ void glass_style_slider(lv_obj_t *slider);
 void glass_style_textarea(lv_obj_t *ta);
 void glass_style_keyboard(lv_obj_t *kb);
 void glass_style_checkbox(lv_obj_t *cb);
+void glass_style_switch(lv_obj_t *sw);
 void glass_style_bar(lv_obj_t *bar);
 
 /* ---- drawer and sheets (also driven by the simulator) ---- */

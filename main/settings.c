@@ -24,6 +24,7 @@
 static const char *TAG = "settings_screen";
 
 static lv_obj_t *settings_screen = NULL;
+static lv_obj_t *settings_main_cont = NULL;
 static lv_obj_t *performance_low_btn = NULL;
 static lv_obj_t *performance_medium_btn = NULL;
 static lv_obj_t *performance_high_btn = NULL;
@@ -650,6 +651,66 @@ void settings_rebuild_for_theme(void)
     ESP_LOGI(TAG, "Rebuilt settings for theme: %s", theme_get_name());
 }
 
+/* A settings toggle as a full-width row: caption on the left, switch on the
+ * right, and the whole row is the touch target.
+ *
+ * This replaces bare lv_checkbox controls, which were 21 px tall inside a
+ * scrolling list. A press a few pixels off, or one that drifts the way a real
+ * finger does, was taken by the container as a scroll, so the list nudged and
+ * nothing toggled. Returns the switch, whose LV_STATE_CHECKED the callers
+ * already read, so their handlers are unchanged. */
+static void settings_toggle_row_clicked(lv_event_t *e)
+{
+    lv_obj_t *sw = (lv_obj_t *) lv_event_get_user_data(e);
+    if (!sw) {
+        return;
+    }
+    if (lv_obj_has_state(sw, LV_STATE_CHECKED)) {
+        lv_obj_clear_state(sw, LV_STATE_CHECKED);
+    } else {
+        lv_obj_add_state(sw, LV_STATE_CHECKED);
+    }
+    /* The switch is what the caller registered on, so tell it, not the row. */
+    lv_event_send(sw, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+static lv_obj_t *settings_toggle_row(lv_obj_t *parent, const char *text,
+                                     int y, int w, int h, bool glass)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, w, h);
+    lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, y);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = lv_label_create(row);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_16, 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 2, 0);
+
+    lv_obj_t *sw = lv_switch_create(row);
+    lv_obj_set_size(sw, 52, 26);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -2, 0);
+    /* Without these the stock theme paints the on state its own blue, which
+     * belongs to no palette we ship. */
+    lv_obj_set_style_bg_color(sw, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(sw, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(sw, COLOR_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, COLOR_ACCENT, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(sw, COLOR_TEXT_PRIMARY, LV_PART_KNOB);
+
+    lv_obj_add_event_cb(row, settings_toggle_row_clicked, LV_EVENT_CLICKED, sw);
+    if (glass) {
+        glass_style_switch(sw);
+    }
+    return sw;
+}
+
 void settings_screen_create(void)
 {
     if (settings_screen != NULL)
@@ -713,6 +774,8 @@ void settings_screen_create(void)
         lv_obj_set_style_pad_bottom(main_cont, 80, 0);
     }
 
+    settings_main_cont = main_cont;
+
     lv_obj_t *title_label = lv_label_create(main_cont);
     lv_label_set_text(title_label, "SETTINGS");
     lv_obj_set_style_text_color(title_label, COLOR_TEXT_PRIMARY, 0);
@@ -771,13 +834,9 @@ void settings_screen_create(void)
     lv_obj_set_style_text_font(fan_title, &lv_font_montserrat_18, 0);
     lv_obj_align(fan_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    auto_fan_checkbox = lv_checkbox_create(fan_section);
-    lv_checkbox_set_text(auto_fan_checkbox, "Automatic Fan Control");
-    lv_obj_set_style_text_color(auto_fan_checkbox, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(auto_fan_checkbox, &lv_font_montserrat_16, 0);
-    lv_obj_align(auto_fan_checkbox, LV_ALIGN_TOP_LEFT, 0, 35);
+    auto_fan_checkbox = settings_toggle_row(fan_section, "Automatic Fan Control",
+                                            26, 660, 40, glass);
     lv_obj_add_event_cb(auto_fan_checkbox, settings_auto_fan_toggled, LV_EVENT_VALUE_CHANGED, NULL);
-    if (glass) glass_style_checkbox(auto_fan_checkbox);
 
     if (current_settings.auto_fan_control)
     {
@@ -801,7 +860,7 @@ void settings_screen_create(void)
     lv_label_set_text(fan_value_label, fan_text);
     lv_obj_set_style_text_color(fan_value_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(fan_value_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(fan_value_label, LV_ALIGN_TOP_LEFT, 450, 65);
+    lv_obj_align(fan_value_label, LV_ALIGN_TOP_LEFT, 450, 72);
 
     fan_save_btn = create_settings_button(fan_section, "SAVE FAN SETTINGS", settings_fan_save_clicked, false);
     lv_obj_set_size(fan_save_btn, 220, 36);
@@ -994,7 +1053,7 @@ void settings_screen_create(void)
     display_control_get_config(&display_config);
 
     lv_obj_t *display_section = lv_obj_create(main_cont);
-    lv_obj_set_size(display_section, 680, 250);
+    lv_obj_set_size(display_section, 680, 262);
     lv_obj_align(display_section, LV_ALIGN_TOP_MID, 0, 690);
     lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(display_section, 0, 0);
@@ -1008,26 +1067,24 @@ void settings_screen_create(void)
     lv_obj_set_style_text_font(display_title, &lv_font_montserrat_18, 0);
     lv_obj_align(display_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    display_schedule_checkbox = lv_checkbox_create(display_section);
-    lv_checkbox_set_text(display_schedule_checkbox, "Turn the display off daily");
-    lv_obj_set_style_text_color(display_schedule_checkbox, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(display_schedule_checkbox, &lv_font_montserrat_16, 0);
-    lv_obj_align(display_schedule_checkbox, LV_ALIGN_TOP_LEFT, 0, 32);
+    display_schedule_checkbox = settings_toggle_row(display_section,
+                                                    "Turn the display off daily",
+                                                    30, 660, 40, glass);
     if (display_config.schedule_enabled) {
         lv_obj_add_state(display_schedule_checkbox, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(display_schedule_checkbox, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
-    if (glass) glass_style_checkbox(display_schedule_checkbox);
+
 
     lv_obj_t *off_label = lv_label_create(display_section);
     lv_label_set_text(off_label, "Turns off at");
     lv_obj_set_style_text_color(off_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(off_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 70);
+    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 80);
 
     display_off_dropdown = lv_dropdown_create(display_section);
     lv_obj_set_size(display_off_dropdown, 300, 36);
-    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 94);
+    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 104);
     lv_dropdown_set_options(display_off_dropdown, display_time_options);
     lv_dropdown_set_selected(display_off_dropdown, display_config.off_minute / 30U);
     style_settings_dropdown(display_off_dropdown, &lv_font_montserrat_14);
@@ -1038,11 +1095,11 @@ void settings_screen_create(void)
     lv_label_set_text(on_label, "Turns on at");
     lv_obj_set_style_text_color(on_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(on_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 70);
+    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 80);
 
     display_on_dropdown = lv_dropdown_create(display_section);
     lv_obj_set_size(display_on_dropdown, 300, 36);
-    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 94);
+    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 104);
     lv_dropdown_set_options(display_on_dropdown, display_time_options);
     lv_dropdown_set_selected(display_on_dropdown, display_config.on_minute / 30U);
     style_settings_dropdown(display_on_dropdown, &lv_font_montserrat_14);
@@ -1053,11 +1110,11 @@ void settings_screen_create(void)
     lv_label_set_text(corner_label, "Display-off button");
     lv_obj_set_style_text_color(corner_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(corner_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 142);
+    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 152);
 
     display_corner_dropdown = lv_dropdown_create(display_section);
     lv_obj_set_size(display_corner_dropdown, 300, 36);
-    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 166);
+    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 176);
     lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
     lv_dropdown_set_selected(display_corner_dropdown,
                              (uint16_t)display_button_mode_from_config(
@@ -1073,12 +1130,12 @@ void settings_screen_create(void)
     lv_obj_set_style_text_font(display_button_mode_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_width(display_button_mode_hint, 650);
     lv_label_set_long_mode(display_button_mode_hint, LV_LABEL_LONG_WRAP);
-    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 210);
+    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 220);
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
     lv_obj_set_size(ota_section, 680, 160);
-    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 950);
+    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 962);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -1154,6 +1211,7 @@ void settings_screen_create(void)
 
 void settings_screen_destroy(void)
 {
+    settings_main_cont = NULL;
     // Clean up Easter egg overlay if showing
     if (sys_overlay) {
         lv_obj_del(sys_overlay);
@@ -1194,6 +1252,13 @@ void settings_screen_destroy(void)
     }
 
     display_control_set_power_button_visible(true);
+}
+
+void settings_scroll_to(int y)
+{
+    if (settings_main_cont) {
+        lv_obj_scroll_to_y(settings_main_cont, y, LV_ANIM_OFF);
+    }
 }
 
 lv_obj_t *settings_get_screen(void)

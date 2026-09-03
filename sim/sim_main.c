@@ -260,6 +260,12 @@ static void handle_command(char *line)
         theme_set_skin((theme_skin_t) atoi(arg));
         display_control_refresh_skin();
         break;
+    case 'V':
+        /* Scroll the settings list to an exact offset, so a test can put a
+         * control at a known position instead of approximating with drags. */
+        settings_scroll_to(atoi(arg));
+        s_dirty = true;
+        break;
     case 'G': {
         /* Glass skin controls: layout <0|1>, widgets <hexmask>, wall <index>,
          * drawer <0|1>, sheet <0..4>. All go through the same setters the

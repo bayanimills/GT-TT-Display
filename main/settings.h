@@ -45,4 +45,8 @@ void settings_night_clicked(lv_event_t * e);
 
 void settings_odds_clicked(lv_event_t * e);
 
+/* Scroll the settings list to an exact offset. Mirrors glass_scroll_to():
+ * it exists so the simulator can put a control at a known position rather
+ * than approximating with drags. */
+void settings_scroll_to(int y);
 #endif // SETTINGS_H
