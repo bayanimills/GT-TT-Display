@@ -3,12 +3,15 @@
  */
 
 #include "ota_update.h"
+#include "wifi.h"
+#include "nvs.h"
 #include "ota_screen.h"
 #include "settings.h"
 #include "bap_client.h"
 #include "lvgl_port.h"
 #include "waveshare_rgb_lcd_port.h"
 #include "esp_log.h"
+#include "esp_system.h"   /* esp_restart(); do not rely on a transitive include */
 #include "esp_https_ota.h"
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
@@ -32,6 +35,18 @@ static const char *ALLOWED_URL_PREFIX = "https://github.com/bayanimills/GT-TT-Di
 
 static SemaphoreHandle_t ota_mutex = NULL;
 static ota_info_t ota_current_info = {0};
+
+#define OTA_NVS_NAMESPACE  "gtdisplay"
+#define OTA_NVS_AUTO_CHECK "ota_auto"
+/* Once a day. Often enough to hear about a release the day it lands, rare
+ * enough that the panel is not talking to GitHub for no reason. */
+#define OTA_AUTO_CHECK_INTERVAL_MS (24 * 60 * 60 * 1000)
+/* The first poll waits this long so it does not race the radio at boot. */
+#define OTA_AUTO_CHECK_FIRST_MS    (2 * 60 * 1000)
+
+static bool ota_auto_check_enabled = false;
+static bool ota_auto_check_loaded = false;
+static TaskHandle_t ota_auto_task_handle = NULL;
 static TaskHandle_t ota_task_handle = NULL;
 static TaskHandle_t version_check_task_handle = NULL;
 
@@ -420,6 +435,94 @@ void ota_update_confirm_running_image(void)
     } else {
         ESP_LOGE(TAG, "failed to confirm OTA image; will roll back on reboot");
     }
+}
+
+static void ota_auto_check_load(void)
+{
+    if (ota_auto_check_loaded) {
+        return;
+    }
+    ota_auto_check_loaded = true;
+
+    nvs_handle_t h;
+    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    uint8_t v = 0;
+    if (nvs_get_u8(h, OTA_NVS_AUTO_CHECK, &v) == ESP_OK) {
+        ota_auto_check_enabled = (v != 0);
+    }
+    nvs_close(h);
+}
+
+bool ota_update_get_auto_check(void)
+{
+    ota_auto_check_load();
+    return ota_auto_check_enabled;
+}
+
+void ota_update_set_auto_check(bool enabled)
+{
+    ota_auto_check_load();
+    if (enabled == ota_auto_check_enabled) {
+        return;
+    }
+    ota_auto_check_enabled = enabled;
+
+    nvs_handle_t h;
+    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, OTA_NVS_AUTO_CHECK, enabled ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "daily update check %s", enabled ? "on" : "off");
+
+    /* Turning it on should tell you something today, not tomorrow. */
+    if (enabled && ota_auto_task_handle) {
+        xTaskNotifyGive(ota_auto_task_handle);
+    }
+}
+
+bool ota_update_available(void)
+{
+    return ota_current_info.status == OTA_STATUS_UPDATE_AVAILABLE;
+}
+
+/* Polls, never installs. The install stays behind the button in settings. */
+static void ota_auto_check_task(void *arg)
+{
+    (void) arg;
+    uint32_t wait_ms = OTA_AUTO_CHECK_FIRST_MS;
+
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
+        wait_ms = OTA_AUTO_CHECK_INTERVAL_MS;
+
+        if (!ota_update_get_auto_check()) {
+            continue;
+        }
+        /* No point asking GitHub before the radio is associated, and the
+         * check must not fight an install that is already running. */
+        if (!wifi_is_connected() || ota_update_is_running()) {
+            wait_ms = 5 * 60 * 1000;
+            continue;
+        }
+        /* Leave a found update on screen rather than re-checking over it. */
+        if (ota_update_available()) {
+            continue;
+        }
+        ESP_LOGI(TAG, "daily update check");
+        ota_check_for_updates();
+    }
+}
+
+void ota_update_start_auto_check(void)
+{
+    if (ota_auto_task_handle) {
+        return;
+    }
+    ota_auto_check_load();
+    xTaskCreate(ota_auto_check_task, "ota_auto", 3072, NULL, 3, &ota_auto_task_handle);
 }
 
 void ota_check_for_updates(void)

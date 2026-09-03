@@ -16,6 +16,7 @@
 #include "odds.h"
 #include "payout.h"
 #include "chain.h"
+#include "ota_update.h"
 #include "display_control.h"
 #include "esp_heap_caps.h"
 #include "custom_fonts.h"
@@ -716,6 +717,21 @@ static lv_obj_t *glass_grid_cell(lv_obj_t *parent, const char *symbol, const lv_
         lv_obj_t *l = glass_label(btn, symbol, &lv_font_montserrat_26, LV_OPA_COVER);
         if (active) lv_obj_set_style_text_color(l, theme_ink_on(COLOR_ACCENT), 0);
         lv_obj_center(l);
+    }
+
+    /* A pending update should be visible without opening settings to find
+     * it, so the cell that leads there wears a dot. */
+    if (user_data == (void *) GLASS_SCREEN_SETTINGS && ota_update_available()) {
+        lv_obj_t *dot = lv_obj_create(cont);
+        lv_obj_set_size(dot, 14, 14);
+        lv_obj_align(dot, LV_ALIGN_TOP_MID, CELL_DISC / 2 - 4, 2);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(dot, COLOR_ACCENT, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(dot, 2, 0);
+        lv_obj_set_style_border_color(dot, lv_color_white(), 0);
+        lv_obj_set_style_border_opa(dot, LV_OPA_70, 0);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     }
 
     lv_obj_t *cap = glass_label(cont, caption, &lv_font_montserrat_16, CAPTION_OPA);

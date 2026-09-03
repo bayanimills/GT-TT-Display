@@ -19,6 +19,7 @@ typedef esp_err_t (*http_event_handle_cb)(esp_http_client_event_t *evt);
 typedef struct {
     const char *url; const char *host; int port; const char *path;
     esp_http_client_method_t method; int timeout_ms;
+    int max_redirection_count;   /* ota_update.c sets this */
     http_event_handle_cb event_handler; void *user_data;
     esp_err_t (*crt_bundle_attach)(void *conf);
     int buffer_size; int buffer_size_tx; bool disable_auto_redirect;

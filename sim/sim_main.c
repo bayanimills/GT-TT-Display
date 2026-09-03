@@ -49,6 +49,7 @@
 #include "odds.h"
 #include "payout.h"
 #include "blockfound.h"
+void sim_ota_fake_available(bool on);
 #include "chain.h"
 #include "loading.h"
 #include "bap_parser.h"
@@ -304,6 +305,14 @@ static void handle_command(char *line)
         s_dirty = true;
         break;
     }
+    case 'U':
+        /* Pretend a release is waiting, to check the badge. */
+        lvgl_port_lock(-1);
+        sim_ota_fake_available(atoi(arg) != 0);
+        lvgl_port_unlock();
+        s_dirty = true;
+        break;
+
     case 'F':
         /* Force the block found screen. Solving a real block to see it is
          * not a practical test plan. */

@@ -109,6 +109,7 @@ static const char *display_corner_options =
 
 static void settings_display_schedule_changed(lv_event_t *e);
 static void settings_refresh_schedule_status(void);
+static void settings_ota_auto_toggled(lv_event_t *e);
 static void settings_schedule_timer_cb(lv_timer_t *t);
 
 static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
@@ -1153,7 +1154,7 @@ void settings_screen_create(void)
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
-    lv_obj_set_size(ota_section, 680, 160);
+    lv_obj_set_size(ota_section, 680, 206);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -1193,6 +1194,15 @@ void settings_screen_create(void)
     ota_update_btn = create_settings_button(ota_section, "CHECK FOR UPDATES", settings_ota_update_clicked, false);
     lv_obj_set_size(ota_update_btn, 240, 36);
     lv_obj_align(ota_update_btn, LV_ALIGN_TOP_LEFT, 0, 110);
+
+    /* Opt in to a daily check. It only ever checks: installing stays on the
+     * button above, so nothing arrives on this panel unattended. */
+    lv_obj_t *auto_sw = settings_toggle_row(ota_section, "Check for updates daily",
+                                            156, 660, 40, glass);
+    if (ota_update_get_auto_check()) {
+        lv_obj_add_state(auto_sw, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(auto_sw, settings_ota_auto_toggled, LV_EVENT_VALUE_CHANGED, NULL);
 
     // Create OTA update timer (500ms interval)
     ota_timer = lv_timer_create(ota_update_timer_cb, 500, NULL);
@@ -1307,6 +1317,11 @@ static void settings_schedule_timer_cb(lv_timer_t *t)
 {
     (void) t;
     settings_refresh_schedule_status();
+}
+
+static void settings_ota_auto_toggled(lv_event_t *e)
+{
+    ota_update_set_auto_check(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
 
 void settings_scroll_to(int y)

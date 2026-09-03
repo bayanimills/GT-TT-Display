@@ -17,3 +17,8 @@ typedef uint32_t TickType_t;
 #define portYIELD_FROM_ISR(x)  do { (void)(x); } while (0)
 #define IRAM_ATTR
 #define tskNO_AFFINITY         (-1)
+
+/* Real FreeRTOS traps here; on a host an assert is the closest thing and
+ * keeps the failure loud rather than silent. */
+#include <assert.h>
+#define configASSERT(x) assert(x)

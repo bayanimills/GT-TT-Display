@@ -39,6 +39,26 @@ typedef struct {
 
 void ota_check_for_updates(void);
 
+/* Opt-in daily poll.
+ *
+ * Off by default, because a mining display should not go looking for new
+ * firmware unless its owner asked it to. When on, the version endpoint is
+ * checked once a day and nothing more: a release is never installed
+ * without someone pressing the button. A bad build that installs itself
+ * takes out the screen you would use to notice.
+ *
+ * Persisted, so the choice survives an update. */
+bool ota_update_get_auto_check(void);
+void ota_update_set_auto_check(bool enabled);
+
+/* True when a poll or a manual check found a release newer than the
+ * running one. Drives the badge, so it must stay cheap. */
+bool ota_update_available(void);
+
+/* Start the daily poll timer. Safe to call once, from app_main; it does
+ * nothing while the setting is off, and nothing before the radio is up. */
+void ota_update_start_auto_check(void);
+
 /* With rollback enabled a freshly OTA'd image boots PENDING_VERIFY and is
  * reverted on the next boot unless it confirms itself. Call this once the
  * first real screen exists, so a build that crashes constructing it rolls

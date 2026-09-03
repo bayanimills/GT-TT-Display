@@ -8,6 +8,7 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "nvs.h"
 #include "ota_update.h"
 #include "ota_screen.h"
 #include "bap_client.h"
@@ -29,6 +30,50 @@ void ota_update_get_info(ota_info_t *info) { if (info) *info = s_ota; }
 bool ota_update_is_running(void) { return false; }
 void ota_update_confirm_running_image(void) { ESP_LOGI(TAG, "ota: image confirmed (sim no-op)"); }
 const char *ota_get_current_version(void) { return "sim"; }
+
+/* The daily check is a real preference even here: the settings toggle reads
+ * and writes it, and NVS is a file, so it survives a restart of the sim the
+ * same way it survives a reboot of the panel. Nothing polls, because there is
+ * nothing here to install. */
+static bool s_auto_check_loaded = false;
+static bool s_auto_check = false;
+
+bool ota_update_get_auto_check(void)
+{
+    if (!s_auto_check_loaded) {
+        s_auto_check_loaded = true;
+        nvs_handle_t h;
+        if (nvs_open("gtdisplay", NVS_READONLY, &h) == ESP_OK) {
+            uint8_t v = 0;
+            if (nvs_get_u8(h, "ota_auto", &v) == ESP_OK) s_auto_check = (v != 0);
+            nvs_close(h);
+        }
+    }
+    return s_auto_check;
+}
+
+void ota_update_set_auto_check(bool enabled)
+{
+    (void) ota_update_get_auto_check();
+    s_auto_check = enabled;
+    nvs_handle_t h;
+    if (nvs_open("gtdisplay", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "ota_auto", enabled ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "ota: daily check %s", enabled ? "on" : "off");
+}
+
+bool ota_update_available(void) { return s_ota.status == OTA_STATUS_UPDATE_AVAILABLE; }
+
+/* Let the simulator pretend a release is waiting, so the badge and the
+  * settings wording can be checked without publishing one. */
+void sim_ota_fake_available(bool on)
+{
+    s_ota.status = on ? OTA_STATUS_UPDATE_AVAILABLE : OTA_STATUS_IDLE;
+}
+void ota_update_start_auto_check(void) { }
 
 void ota_screen_show(void) { }
 void ota_screen_update_progress(int p) { (void) p; }
