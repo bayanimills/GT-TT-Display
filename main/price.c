@@ -1,4 +1,6 @@
 #include "price.h"
+#include "odds.h"
+#include "chain.h"
 #include "home.h"
 #include "block.h"
 #include "clock.h"
@@ -23,8 +25,33 @@
 #define PRICE_HTTP_BUF_SIZE 512
 #define PRICE_FETCH_INTERVAL_MS 60000
 
-static const char *PRICE_API_URL = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd";
-static const char *PRICE_API_FALLBACK_URL = "https://api.coinbase.com/v2/prices/BTC-USD/spot";
+/* CoinGecko quotes several currencies in one response, so the selected one and
+ * USD are asked for together: the pair gives both the figure to display and
+ * the ratio every USD-denominated number elsewhere is converted through. That
+ * is why there is no separate FX provider to go down. */
+static void price_build_coingecko_url(char *out, size_t n)
+{
+    char lower[8];
+    const char *code = chain_ccy_code(chain_get_ccy());
+    size_t i = 0;
+    for (; code[i] && i < sizeof(lower) - 1; i++)
+    {
+        lower[i] = (char)((code[i] >= 'A' && code[i] <= 'Z') ? code[i] + 32 : code[i]);
+    }
+    lower[i] = 0;
+
+    snprintf(out, n,
+             "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=%s,usd",
+             lower);
+}
+
+/* Coinbase quotes one currency per request, so the fallback can show the right
+ * number but cannot establish a ratio. */
+static void price_build_coinbase_url(char *out, size_t n)
+{
+    snprintf(out, n, "https://api.coinbase.com/v2/prices/BTC-%s/spot",
+             chain_ccy_code(chain_get_ccy()));
+}
 
 static lv_obj_t *price_screen = NULL;
 static lv_obj_t *price_value_cont = NULL;
@@ -54,6 +81,55 @@ static void price_set_status(const char *status);
 
 static char price_http_buf[PRICE_HTTP_BUF_SIZE];
 static int price_http_len = 0;
+
+/* Set when the currency changes, so the poll interval is cut short rather
+ * than leaving the old currency's figure up for another minute. */
+static volatile bool price_refetch_requested = false;
+
+static void price_wait(uint32_t ms)
+{
+    const uint32_t slice = 500;
+    for (uint32_t waited = 0; waited < ms; waited += slice)
+    {
+        if (price_refetch_requested)
+        {
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(slice));
+    }
+}
+
+/* Called from the settings dropdown, on the LVGL task with the lock already
+ * held. Relabels what is on screen and blanks the figure, because the old
+ * number in the new currency's symbol would be a lie until the fetch lands. */
+void price_currency_changed(void)
+{
+    const chain_ccy_t ccy = chain_get_ccy();
+
+    strncpy(current_price_text, "--", sizeof(current_price_text) - 1);
+    current_price_text[sizeof(current_price_text) - 1] = 0;
+
+    if (price_title_label)
+    {
+        lv_label_set_text_fmt(price_title_label, "BTC PRICE (%s)", chain_ccy_code(ccy));
+    }
+    if (price_prefix_label)
+    {
+        lv_label_set_text(price_prefix_label, chain_ccy_prefix(ccy));
+    }
+    if (price_suffix_label)
+    {
+        lv_label_set_text(price_suffix_label,
+                          ccy == CHAIN_CCY_USD ? "" : chain_ccy_code(ccy));
+    }
+    if (price_value_label)
+    {
+        lv_label_set_text(price_value_label, current_price_text);
+    }
+    price_set_status("LOADING...");
+
+    price_refetch_requested = true;
+}
 
 static esp_err_t price_http_event_handler(esp_http_client_event_t *evt)
 {
@@ -100,7 +176,8 @@ void price_screen_create(void)
     }
 
     price_title_label = lv_label_create(parent);
-    lv_label_set_text(price_title_label, "BTC PRICE (USD)");
+    lv_label_set_text_fmt(price_title_label, "BTC PRICE (%s)",
+                          chain_ccy_code(chain_get_ccy()));
     lv_obj_set_style_text_color(price_title_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(price_title_label, &lv_font_montserrat_20, 0);
     lv_obj_align(price_title_label, LV_ALIGN_TOP_MID, 0, 30);
@@ -127,7 +204,7 @@ void price_screen_create(void)
     }
 
     price_prefix_label = lv_label_create(price_value_cont);
-    lv_label_set_text(price_prefix_label, "$");
+    lv_label_set_text(price_prefix_label, chain_ccy_prefix(chain_get_ccy()));
     lv_obj_set_style_text_color(price_prefix_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_opa(price_prefix_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(price_prefix_label, &montserrat_140, 0);
@@ -139,7 +216,11 @@ void price_screen_create(void)
     lv_obj_set_style_text_letter_space(price_value_label, 2, 0);
 
     price_suffix_label = lv_label_create(price_value_cont);
-    lv_label_set_text(price_suffix_label, "");
+    /* The suffix is in a font with an alphabet, so it carries the currency
+     * for anything other than USD. That also covers GBP, EUR and JPY, whose
+     * symbols the big face cannot draw at all. */
+    lv_label_set_text(price_suffix_label,
+                      chain_get_ccy() == CHAIN_CCY_USD ? "" : chain_ccy_code(chain_get_ccy()));
     lv_obj_set_style_text_color(price_suffix_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_opa(price_suffix_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(price_suffix_label, &lv_font_montserrat_48, 0);
@@ -172,6 +253,7 @@ void price_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &cubes_solid_full, price_mempool_clicked, false);
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, price_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", NULL, true);
+    create_bottom_nav_btn(bottom_nav, "%", price_odds_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, price_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, price_settings_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, price_night_clicked, false);
@@ -235,12 +317,16 @@ static bool price_fetch_once(void)
         return false;
     }
 
-    if (price_fetch_from_url(PRICE_API_URL))
+    char url[192];
+
+    price_build_coingecko_url(url, sizeof(url));
+    if (price_fetch_from_url(url))
     {
         return true;
     }
 
-    return price_fetch_from_url(PRICE_API_FALLBACK_URL);
+    price_build_coinbase_url(url, sizeof(url));
+    return price_fetch_from_url(url);
 }
 
 static bool price_ensure_netif(void)
@@ -332,6 +418,35 @@ static bool price_fetch_from_url(const char *url)
     return true;
 }
 
+/* Pull one lowercase currency key out of the flat CoinGecko response. */
+static bool price_parse_coingecko_key(const char *json, const char *code, double *out)
+{
+    char key[16];
+    size_t i = 0;
+
+    key[i++] = '"';
+    for (size_t j = 0; code[j] && i < sizeof(key) - 3; j++)
+    {
+        key[i++] = (char)((code[j] >= 'A' && code[j] <= 'Z') ? code[j] + 32 : code[j]);
+    }
+    key[i++] = '"';
+    key[i++] = ':';
+    key[i] = 0;
+
+    const char *p = strstr(json, key);
+    if (!p)
+    {
+        return false;
+    }
+    const double v = strtod(p + strlen(key), NULL);
+    if (v <= 0.0)
+    {
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
 static bool price_parse_coingecko(const char *json, double *out_price)
 {
     if (!json || !out_price)
@@ -339,20 +454,23 @@ static bool price_parse_coingecko(const char *json, double *out_price)
         return false;
     }
 
-    const char *usd_ptr = strstr(json, "\"usd\":");
-    if (!usd_ptr)
+    const chain_ccy_t ccy = chain_get_ccy();
+    double local = 0.0;
+    if (!price_parse_coingecko_key(json, chain_ccy_code(ccy), &local))
     {
         return false;
     }
 
-    usd_ptr += 6;
-    double price = strtod(usd_ptr, NULL);
-    if (price <= 0.0)
+    /* Both keys are in the same response, so the ratio is taken from a single
+     * instant. When USD is selected the two are the same key and the ratio is
+     * exactly 1, which is the right answer rather than a special case. */
+    double usd = 0.0;
+    if (price_parse_coingecko_key(json, "usd", &usd) && usd > 0.0)
     {
-        return false;
+        chain_set_fx_to_usd(local / usd);
     }
 
-    *out_price = price;
+    *out_price = local;
     return true;
 }
 
@@ -432,6 +550,8 @@ static void price_task(void *arg)
     (void)arg;
     while (1)
     {
+        price_refetch_requested = false;
+
         if (ota_update_is_running())
         {
             vTaskDelay(pdMS_TO_TICKS(5000));
@@ -477,7 +597,7 @@ static void price_task(void *arg)
                 }
                 price_set_status("LIVE");
                 lvgl_port_unlock();
-                vTaskDelay(pdMS_TO_TICKS(PRICE_FETCH_INTERVAL_MS));
+                price_wait(PRICE_FETCH_INTERVAL_MS);
                 continue;
             }
 
@@ -485,7 +605,7 @@ static void price_task(void *arg)
             lvgl_port_unlock();
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10000));
+        price_wait(10000);
     }
 }
 
@@ -594,5 +714,12 @@ void price_night_clicked(lv_event_t *e)
     LV_UNUSED(e);
     night_screen_create();
     lv_scr_load(night_get_screen());
+    price_screen_destroy();
+}
+
+void price_odds_clicked(lv_event_t *e)
+{
+    odds_screen_create();
+    lv_scr_load(odds_get_screen());
     price_screen_destroy();
 }

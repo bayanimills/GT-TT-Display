@@ -43,4 +43,6 @@ void settings_mempool_clicked(lv_event_t * e);
 void settings_wifi_clicked(lv_event_t * e);
 void settings_night_clicked(lv_event_t * e);
 
+void settings_odds_clicked(lv_event_t * e);
+
 #endif // SETTINGS_H

@@ -21,4 +21,10 @@ void price_wifi_clicked(lv_event_t *e);
 void price_settings_clicked(lv_event_t *e);
 void price_night_clicked(lv_event_t *e);
 
+void price_odds_clicked(lv_event_t * e);
+
+/* Relabel and refetch after the currency setting changes. Call on the
+ * LVGL task. */
+void price_currency_changed(void);
+
 #endif // PRICE_H

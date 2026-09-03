@@ -15,4 +15,6 @@ void clock_wifi_clicked(lv_event_t *e);
 void clock_settings_clicked(lv_event_t *e);
 void clock_night_clicked(lv_event_t *e);
 
+void clock_odds_clicked(lv_event_t * e);
+
 #endif // CLOCK_H

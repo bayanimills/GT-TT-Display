@@ -58,6 +58,7 @@ typedef enum {
     GLASS_SCREEN_WIFI,
     GLASS_SCREEN_SETTINGS,
     GLASS_SCREEN_NIGHT,
+    GLASS_SCREEN_ODDS,
     GLASS_SCREEN_COUNT
 } glass_screen_t;
 

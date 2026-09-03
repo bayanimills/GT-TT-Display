@@ -43,4 +43,6 @@ void wifi_mempool_clicked(lv_event_t * e);
 void wifi_settings_clicked(lv_event_t * e);
 void wifi_night_clicked(lv_event_t * e);
 
+void wifi_odds_clicked(lv_event_t * e);
+
 #endif // WIFI_H

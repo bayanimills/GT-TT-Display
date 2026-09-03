@@ -92,7 +92,7 @@ K <skin>            select skin: 0 classic, 1 glass (home rebuilds)
 G <what> <value>    glass skin: layout 0|1, widgets <hexmask>, wall <index>,
                     drawer 0|1, sheet 0..5 (widgets, layout, style, pool;
                     5 also opens style), scroll <px>
-N <screen>          home night block clock price mempool wifi settings
+N <screen>          home night block clock price mempool wifi settings odds
 D off | D mode <n>  display off (as the corner control); button mode 0..3
 R                   force repaint
 Q                   quit
@@ -127,6 +127,10 @@ Frames come back on stdout as `"GTFB" | u32 frame | u16 w | u16 h | RGB565 LE`.
 - The sim renders with LVGL's software renderer at host speed; it is not a
   timing model of the ESP32-S3. Layout, colour and touch behaviour are faithful,
   frame pacing is not.
+- The solo odds screen and the block screen's halving row need `chain.c` to
+  have fetched, which `SIM_OFFLINE` prevents. Run `shot.py --online --settle 20`
+  or `server.py` with the environment variable unset to see real figures;
+  offline they show `--`, which is also what the device shows before Wi-Fi.
 - `SIM_OFFLINE=1` is set by default so `price.c` / `mempool.c` do not stall on
   network calls. Unset it to let them fetch for real through `curl`.
 - `SIM_TASKS=0` disables background task spawning if you are chasing a crash.

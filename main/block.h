@@ -19,4 +19,6 @@ void block_wifi_clicked(lv_event_t *e);
 void block_settings_clicked(lv_event_t *e);
 void block_night_clicked(lv_event_t *e);
 
+void block_odds_clicked(lv_event_t * e);
+
 #endif // BLOCK_H

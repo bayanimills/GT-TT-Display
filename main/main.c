@@ -2,6 +2,7 @@
 #include "loading.h"
 #include "theme.h"
 #include "settings.h"
+#include "chain.h"
 #include "display_control.h"
 
 #include "esp_log.h"
@@ -37,6 +38,11 @@ void app_main()
     wavesahre_rgb_lcd_bl_on();
     /* Timezone must be applied before the display schedule can be judged. */
     settings_initialize();
+
+    /* Starts the chain refresh task. It retries on its own until Wi-Fi is up,
+     * so it costs nothing to start before the radio is associated, and the
+     * odds screen has a snapshot waiting the first time it is opened. */
+    chain_init();
 
     ESP_LOGI(TAG, "BAP Touch Display -- Build by WantClue with Love");
     ESP_LOGI(TAG, "theme: %s", theme_get_name());

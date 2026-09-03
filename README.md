@@ -117,6 +117,34 @@ The primary screen displays real-time mining information:
 - **Hardware Info**: Device model, ASIC type, fan speed
 - **Navigation Cards**: Touch-friendly access to all features
 
+### Solo Odds (`odds.c`)
+What the miner's own hashrate is worth against the live network:
+
+- **Chance of a block per day**, as a "1 in N" figure, from the current
+  difficulty and the hashrate BAP reports
+- **Expected wait** until a block at that hashrate
+- **Network difficulty**
+- **Pool equivalent**: what the same hashrate would earn per day at the
+  current hashprice (bitview.space only; the cell says so otherwise)
+
+The arithmetic runs on the panel, so the numbers track the miner between
+network fetches. The block screen carries the matching network countdowns:
+blocks and days to the halving, and the size and distance of the next
+difficulty retarget.
+
+### Network Data (`chain.c`)
+Chain figures come from either **mempool.space** or **bitview.space**,
+selectable in settings. Both serve the same REST shape, so the choice is
+which host to trust and reach. bitview additionally exposes BRK's time-series
+API, which answers difficulty, network hashrate and hashprice in a single
+~94 byte response; on mempool.space hashprice is unavailable and the odds
+screen says so rather than guessing.
+
+Price is shown in **USD, AUD, NZD, GBP, EUR, CAD or JPY**. The selected
+currency and USD are fetched together in one CoinGecko call, so the ratio
+used to convert every other USD figure comes from the same instant and needs
+no separate exchange-rate provider.
+
 ### Settings Interface (`settings.c`)
 Comprehensive configuration options:
 

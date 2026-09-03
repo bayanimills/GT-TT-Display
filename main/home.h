@@ -83,4 +83,6 @@ void home_clock_clicked(lv_event_t * e);
 void home_price_clicked(lv_event_t * e);
 void home_mempool_clicked(lv_event_t * e);
 
+void home_odds_clicked(lv_event_t * e);
+
 #endif // HOME_H

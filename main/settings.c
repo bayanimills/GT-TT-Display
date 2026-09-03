@@ -1,4 +1,6 @@
 #include "settings.h"
+#include "odds.h"
+#include "chain.h"
 #include "home.h"
 #include "glass.h"
 #include "wifi.h"
@@ -32,6 +34,8 @@ static lv_obj_t *fan_save_btn = NULL;
 static lv_obj_t *brightness_slider = NULL;
 static lv_obj_t *brightness_value_label = NULL;
 static lv_obj_t *timezone_dropdown = NULL;
+static lv_obj_t *data_source_dropdown = NULL;
+static lv_obj_t *currency_dropdown = NULL;
 static lv_obj_t *display_schedule_checkbox = NULL;
 static lv_obj_t *display_off_dropdown = NULL;
 static lv_obj_t *display_on_dropdown = NULL;
@@ -607,6 +611,23 @@ static void settings_skin_changed(lv_event_t *e)
     lv_async_call(settings_apply_skin_async, (void *) (intptr_t) index);
 }
 
+/* Switching provider only changes which host the fetch tasks talk to, so it
+ * takes effect on their next pass; chain.c wakes its own task immediately. */
+static void settings_data_source_changed(lv_event_t *e)
+{
+    uint16_t index = lv_dropdown_get_selected(lv_event_get_target(e));
+    ESP_LOGI(TAG, "Data source selected: %u", (unsigned) index);
+    chain_set_source((chain_source_t) index);
+}
+
+static void settings_currency_changed(lv_event_t *e)
+{
+    uint16_t index = lv_dropdown_get_selected(lv_event_get_target(e));
+    ESP_LOGI(TAG, "Currency selected: %u", (unsigned) index);
+    chain_set_ccy((chain_ccy_t) index);
+    price_currency_changed();
+}
+
 void settings_rebuild_for_theme(void)
 {
     if (settings_screen == NULL) {
@@ -926,12 +947,55 @@ void settings_screen_create(void)
     lv_obj_add_event_cb(timezone_dropdown, settings_timezone_changed, LV_EVENT_VALUE_CHANGED, NULL);
     if (glass) glass_style_dropdown(timezone_dropdown);
 
+    /* Where the chain figures come from, and what fiat they are shown in.
+     * Both providers serve the same REST shape, so the choice is which host
+     * to trust and reach rather than which features are available; only
+     * hashprice differs, and the odds screen says so when it is missing. */
+    lv_obj_t *data_section = lv_obj_create(main_cont);
+    lv_obj_set_size(data_section, 680, 50);
+    lv_obj_align(data_section, LV_ALIGN_TOP_MID, 0, 620);
+    lv_obj_set_style_bg_opa(data_section, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(data_section, 0, 0);
+    lv_obj_set_style_pad_all(data_section, 10, 0);
+    lv_obj_clear_flag(data_section, LV_OBJ_FLAG_SCROLLABLE);
+    if (glass) lv_obj_clear_flag(data_section, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *data_title = lv_label_create(data_section);
+    lv_label_set_text(data_title, "Data:");
+    lv_obj_set_style_text_color(data_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(data_title, &lv_font_montserrat_18, 0);
+    lv_obj_align(data_title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    data_source_dropdown = lv_dropdown_create(data_section);
+    lv_obj_set_size(data_source_dropdown, 220, 34);
+    lv_obj_align(data_source_dropdown, LV_ALIGN_TOP_LEFT, 140, -4);
+    lv_dropdown_set_options(data_source_dropdown, "mempool.space\nbitview.space");
+    lv_dropdown_set_selected(data_source_dropdown, (uint16_t) chain_get_source());
+    style_settings_dropdown(data_source_dropdown, &lv_font_montserrat_16);
+    lv_obj_add_event_cb(data_source_dropdown, settings_data_source_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    if (glass) glass_style_dropdown(data_source_dropdown);
+
+    lv_obj_t *currency_title = lv_label_create(data_section);
+    lv_label_set_text(currency_title, "Currency:");
+    lv_obj_set_style_text_color(currency_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(currency_title, &lv_font_montserrat_18, 0);
+    lv_obj_align(currency_title, LV_ALIGN_TOP_LEFT, 392, 0);
+
+    currency_dropdown = lv_dropdown_create(data_section);
+    lv_obj_set_size(currency_dropdown, 130, 34);
+    lv_obj_align(currency_dropdown, LV_ALIGN_TOP_LEFT, 500, -4);
+    lv_dropdown_set_options(currency_dropdown, "USD\nAUD\nNZD\nGBP\nEUR\nCAD\nJPY");
+    lv_dropdown_set_selected(currency_dropdown, (uint16_t) chain_get_ccy());
+    style_settings_dropdown(currency_dropdown, &lv_font_montserrat_16);
+    lv_obj_add_event_cb(currency_dropdown, settings_currency_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    if (glass) glass_style_dropdown(currency_dropdown);
+
     display_control_config_t display_config;
     display_control_get_config(&display_config);
 
     lv_obj_t *display_section = lv_obj_create(main_cont);
     lv_obj_set_size(display_section, 680, 250);
-    lv_obj_align(display_section, LV_ALIGN_TOP_MID, 0, 620);
+    lv_obj_align(display_section, LV_ALIGN_TOP_MID, 0, 690);
     lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(display_section, 0, 0);
     lv_obj_set_style_pad_all(display_section, 10, 0);
@@ -1014,7 +1078,7 @@ void settings_screen_create(void)
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
     lv_obj_set_size(ota_section, 680, 160);
-    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 880);
+    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 950);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -1082,6 +1146,7 @@ void settings_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &cubes_solid_full, settings_mempool_clicked, false);
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, settings_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", settings_price_clicked, false);
+    create_bottom_nav_btn(bottom_nav, "%", settings_odds_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, settings_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, settings_diagnostics_handler, true);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, settings_night_clicked, false);
@@ -1338,5 +1403,12 @@ void settings_night_clicked(lv_event_t *e)
     // Navigate to night mode screen
     night_screen_create();
     lv_scr_load(night_get_screen());
+    settings_screen_destroy();
+}
+
+void settings_odds_clicked(lv_event_t *e)
+{
+    odds_screen_create();
+    lv_scr_load(odds_get_screen());
     settings_screen_destroy();
 }

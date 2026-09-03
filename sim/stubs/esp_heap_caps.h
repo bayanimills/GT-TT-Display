@@ -1,6 +1,7 @@
 #pragma once
 #include <stdlib.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "sdkconfig.h"
 static inline void *heap_caps_malloc(size_t sz, uint32_t caps) { (void) caps; return malloc(sz); }
 static inline void *heap_caps_calloc(size_t n, size_t sz, uint32_t caps) { (void) caps; return calloc(n, sz); }

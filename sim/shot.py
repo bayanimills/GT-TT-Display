@@ -24,7 +24,8 @@ PRESETS = [
     "Bitaxe Red", "Bitcoin Orange", "Matrix Green", "Cyber Cyan", "Deep Violet",
     "Nord", "Gruvbox", "Paper (light)", "Mono",
 ]
-SCREENS = ["home", "night", "block", "clock", "price", "mempool", "wifi", "settings"]
+SCREENS = ["home", "night", "block", "clock", "price", "mempool", "wifi", "settings",
+           "odds"]
 
 def bap(param, value):
     """BAP RES sentence with a real XOR checksum -- the parser drops bad ones."""

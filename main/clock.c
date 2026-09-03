@@ -1,4 +1,5 @@
 #include "clock.h"
+#include "odds.h"
 #include "home.h"
 #include "block.h"
 #include "wifi.h"
@@ -113,6 +114,7 @@ void clock_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &cubes_solid_full, clock_mempool_clicked, false);
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, NULL, true);
     create_bottom_nav_btn(bottom_nav, "$", clock_price_clicked, false);
+    create_bottom_nav_btn(bottom_nav, "%", clock_odds_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, clock_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, clock_settings_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, clock_night_clicked, false);
@@ -315,5 +317,12 @@ void clock_night_clicked(lv_event_t *e)
     LV_UNUSED(e);
     night_screen_create();
     lv_scr_load(night_get_screen());
+    clock_screen_destroy();
+}
+
+void clock_odds_clicked(lv_event_t *e)
+{
+    odds_screen_create();
+    lv_scr_load(odds_get_screen());
     clock_screen_destroy();
 }

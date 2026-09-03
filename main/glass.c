@@ -13,6 +13,7 @@
 #include "wifi.h"
 #include "settings.h"
 #include "night.h"
+#include "odds.h"
 #include "display_control.h"
 #include "esp_heap_caps.h"
 #include "custom_fonts.h"
@@ -43,6 +44,10 @@ static const char *TAG = "glass";
 
 #define DRAWER_H      124
 #define DRAWER_MARGIN 14
+/* The drawer row is SCREEN_WIDTH - 2*DRAWER_MARGIN - 16 = 756 px wide and
+ * holds eleven buttons, so anything above 68 pushes the last caption past
+ * the edge, where the row clips it. Widen this only by taking a button out. */
+#define DRAWER_BTN_W  68
 
 /* Text tiers. Captions and sub-values each have a floor; nothing on a pane is
  * drawn fainter than the sub-value tier. Contrast itself is guaranteed by the
@@ -656,7 +661,7 @@ static lv_obj_t *glass_round_button(lv_obj_t *parent, const char *symbol, const 
                                     const char *caption, lv_event_cb_t cb, void *user_data, bool active)
 {
     lv_obj_t *cont = lv_obj_create(parent);
-    lv_obj_set_size(cont, 75, 84);
+    lv_obj_set_size(cont, DRAWER_BTN_W, 84);
     lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(cont, 0, 0);
     lv_obj_set_style_pad_all(cont, 0, 0);
@@ -1200,6 +1205,7 @@ static const nav_fns_t k_nav[GLASS_SCREEN_COUNT] = {
     { wifi_screen_create,     wifi_get_screen,     wifi_screen_destroy     },
     { settings_screen_create, settings_get_screen, settings_screen_destroy },
     { night_screen_create,    night_get_screen,    night_screen_destroy    },
+    { odds_screen_create,     odds_get_screen,     odds_screen_destroy     },
 };
 
 /* Same order as every classic handler: build the next screen, load it, then
@@ -1380,6 +1386,7 @@ void glass_drawer_open(void)
     glass_round_button(row, NULL, &cubes_solid_full,  "Mempool",   drawer_nav_cb, (void *) GLASS_SCREEN_MEMPOOL,  k == GLASS_SCREEN_MEMPOOL);
     glass_round_button(row, NULL, &clock_solid_full,  "Clock",     drawer_nav_cb, (void *) GLASS_SCREEN_CLOCK,    k == GLASS_SCREEN_CLOCK);
     glass_round_button(row, "$",                 NULL, "Price",     drawer_nav_cb, (void *) GLASS_SCREEN_PRICE,    k == GLASS_SCREEN_PRICE);
+    glass_round_button(row, "%",                 NULL, "Odds",      drawer_nav_cb, (void *) GLASS_SCREEN_ODDS,     k == GLASS_SCREEN_ODDS);
     glass_round_button(row, LV_SYMBOL_UPLOAD,    NULL, "Pool",      drawer_sheet_cb, (void *) GLASS_SHEET_POOL, false);
     glass_round_button(row, LV_SYMBOL_WIFI,      NULL, "Wi-Fi",     drawer_nav_cb, (void *) GLASS_SCREEN_WIFI,     k == GLASS_SCREEN_WIFI);
     glass_round_button(row, LV_SYMBOL_SETTINGS,  NULL, "Settings",  drawer_nav_cb, (void *) GLASS_SCREEN_SETTINGS, k == GLASS_SCREEN_SETTINGS);

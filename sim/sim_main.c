@@ -46,6 +46,8 @@
 #include "mempool.h"
 #include "wifi.h"
 #include "settings.h"
+#include "odds.h"
+#include "chain.h"
 #include "loading.h"
 #include "bap_parser.h"
 #include "display_control.h"
@@ -136,6 +138,7 @@ static const sim_screen_t k_screens[] = {
     { "mempool",  mempool_screen_create,  mempool_screen_destroy,  mempool_get_screen  },
     { "wifi",     wifi_screen_create,     wifi_screen_destroy,     wifi_get_screen     },
     { "settings", settings_screen_create, settings_screen_destroy, settings_get_screen },
+    { "odds",     odds_screen_create,     odds_screen_destroy,     odds_get_screen     },
 };
 #define SCREEN_COUNT ((int) (sizeof(k_screens) / sizeof(k_screens[0])))
 
@@ -393,6 +396,7 @@ int main(void)
 
     /* Boot exactly like the device does. */
     settings_initialize();
+    chain_init();
     if (lvgl_port_lock(-1)) {
         loading();
         display_control_init();

@@ -1,4 +1,6 @@
 #include "mempool.h"
+#include "odds.h"
+#include "chain.h"
 #include "custom_fonts.h"
 #include "glass.h"
 #include "home.h"
@@ -19,19 +21,28 @@
 #include "lwip/apps/sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include "ota_update.h"
 
-#define MEMPOOL_HTTP_BUF_SIZE 65536
+/* The feed returns fifteen blocks; we parse the first MEMPOOL_MAX_BLOCKS.
+ * Those measure about 17.6 KB against mempool.space and bitview alike, so
+ * this holds them with half again spare. Anything past the end is truncated,
+ * which costs at worst the last card rather than the fetch, and it keeps
+ * 40 KB of internal RAM out of a static array on a board that has to fit
+ * LVGL in the same heap. */
+#define MEMPOOL_HTTP_BUF_SIZE 24576
 #define MEMPOOL_MAX_BLOCKS 8
 #define MEMPOOL_FETCH_INTERVAL_MS 60000
 
 #define CARD_W 210
 #define CARD_H 210
 
-static const char *MEMPOOL_API_URL = "https://mempool.space/api/v1/blocks";
+/* Path only: the host comes from the data source setting, and both providers
+ * serve this route with the same response shape. */
+#define MEMPOOL_API_PATH "/api/v1/blocks"
 
 typedef struct
 {
@@ -199,6 +210,7 @@ void mempool_screen_create(void)
     create_bottom_nav_btn_img(bottom_nav, &cubes_solid_full, NULL, true);
     create_bottom_nav_btn_img(bottom_nav, &clock_solid_full, mempool_clock_clicked, false);
     create_bottom_nav_btn(bottom_nav, "$", mempool_price_clicked, false);
+    create_bottom_nav_btn(bottom_nav, "%", mempool_odds_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_WIFI, mempool_wifi_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_SETTINGS, mempool_settings_clicked, false);
     create_bottom_nav_btn(bottom_nav, LV_SYMBOL_EYE_OPEN, mempool_night_clicked, false);
@@ -322,7 +334,12 @@ static void mempool_task(void *arg)
         {
             if (updated)
             {
-                mempool_set_status("LIVE (from mempool.space)");
+                /* Name the provider actually used, not the one that used to
+                 * be hardcoded here. */
+                char status[48];
+                snprintf(status, sizeof(status), "LIVE (from %s)",
+                         chain_source_name(chain_get_source()));
+                mempool_set_status(status);
                 mempool_rebuild_cards();
                 lvgl_port_unlock();
                 vTaskDelay(pdMS_TO_TICKS(MEMPOOL_FETCH_INTERVAL_MS));
@@ -339,8 +356,11 @@ static void mempool_task(void *arg)
 
 static bool mempool_fetch_once(void)
 {
+    char url[160];
+    snprintf(url, sizeof(url), "%s%s", chain_base_url(), MEMPOOL_API_PATH);
+
     esp_http_client_config_t config = {
-        .url = MEMPOOL_API_URL,
+        .url = url,
         .event_handler = mempool_http_event_handler,
         .timeout_ms = 12000,
     };
@@ -1057,5 +1077,12 @@ void mempool_night_clicked(lv_event_t *e)
     LV_UNUSED(e);
     night_screen_create();
     lv_scr_load(night_get_screen());
+    mempool_screen_destroy();
+}
+
+void mempool_odds_clicked(lv_event_t *e)
+{
+    odds_screen_create();
+    lv_scr_load(odds_get_screen());
     mempool_screen_destroy();
 }
