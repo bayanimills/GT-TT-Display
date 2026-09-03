@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "esp_log.h"
+#include "chain.h"
 #include "bap_parser.h"
 #include "bap_protocol.h"
 #include "home.h"
@@ -301,6 +302,11 @@ esp_err_t bap_handle_pool_user_response(const char *value) {
     
     ESP_LOGI(TAG, "Received pool user: %s", value);
     
+    /* On a solo pool the user is the payout address with the worker name
+     * after a dot, which is the only place the display learns where its own
+     * rewards would land. chain.c ignores anything that is not an address. */
+    chain_set_watch_address(value);
+
     pool_info_t pool_update = {0};
     strncpy(pool_update.worker_name, value, sizeof(pool_update.worker_name) - 1);
     

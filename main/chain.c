@@ -67,6 +67,7 @@ static chain_data_t s_data;
 static char         s_http_buf[CHAIN_HTTP_BUF_SIZE];
 static int          s_http_len = 0;
 static TaskHandle_t s_task = NULL;
+static chain_address_t s_addr;
 
 /* ---- preferences ---- */
 
@@ -181,6 +182,56 @@ void chain_set_fx_to_usd(double ratio)
 }
 
 const chain_data_t *chain_data(void) { return &s_data; }
+
+const chain_address_t *chain_address(void) { return &s_addr; }
+
+/* Cheap plausibility check. The point is to reject a pool user that is a
+ * plain username rather than to validate bech32 or base58: a wrong-looking
+ * string here costs a doomed request every refresh, and the API is the thing
+ * that actually decides whether an address exists. */
+static bool looks_like_address(const char *a)
+{
+    if (!a) {
+        return false;
+    }
+    const size_t n = strlen(a);
+    if (n < 26 || n >= sizeof(s_addr.address)) {
+        return false;
+    }
+    if (a[0] == 'b' && a[1] == 'c' && a[2] == '1') {
+        return true;              /* bc1... bech32 and bech32m */
+    }
+    return a[0] == '1' || a[0] == '3';   /* P2PKH, P2SH */
+}
+
+void chain_set_watch_address(const char *addr)
+{
+    char buf[sizeof(s_addr.address)];
+
+    if (!addr || !addr[0]) {
+        return;
+    }
+    /* A solo pool user is the address, a dot, then the worker name. */
+    size_t i = 0;
+    while (addr[i] && addr[i] != '.' && i < sizeof(buf) - 1) {
+        buf[i] = addr[i];
+        i++;
+    }
+    buf[i] = 0;
+
+    if (!looks_like_address(buf) || strcmp(buf, s_addr.address) == 0) {
+        return;
+    }
+
+    memset(&s_addr, 0, sizeof(s_addr));
+    strncpy(s_addr.address, buf, sizeof(s_addr.address) - 1);
+    s_addr.watching = true;
+    ESP_LOGI(TAG, "watching payout address ending %s",
+             s_addr.address + (strlen(s_addr.address) > 6 ? strlen(s_addr.address) - 6 : 0));
+    if (s_task) {
+        xTaskNotifyGive(s_task);
+    }
+}
 
 void chain_fmt_grouped(long v, char *buf, size_t n)
 {
@@ -469,6 +520,144 @@ static bool chain_fetch_mempool(chain_data_t *d)
     return got_difficulty;
 }
 
+/* Recommended fees. 90 bytes, and both providers serve it. */
+static bool chain_fetch_fees(chain_data_t *d)
+{
+    char url[160];
+    snprintf(url, sizeof(url), "%s/api/v1/fees/recommended", chain_base_url());
+    if (!chain_get(url))
+    {
+        return false;
+    }
+
+    double v = 0.0;
+    bool got = false;
+    if (json_get_double(s_http_buf, "\"fastestFee\":", &v))   { d->fee_fastest   = v; got = true; }
+    if (json_get_double(s_http_buf, "\"halfHourFee\":", &v))  { d->fee_half_hour = v; }
+    if (json_get_double(s_http_buf, "\"hourFee\":", &v))      { d->fee_hour      = v; }
+    if (json_get_double(s_http_buf, "\"economyFee\":", &v))   { d->fee_economy   = v; }
+    if (json_get_double(s_http_buf, "\"minimumFee\":", &v))   { d->fee_minimum   = v; }
+    d->fees_valid = got;
+    return got;
+}
+
+/* Mempool backlog. The body is about 13 KB because of a thousand-entry fee
+ * histogram, but count, vsize and total_fee are the first sixty bytes of it,
+ * so the truncating buffer costs nothing we read. */
+static bool chain_fetch_mempool_backlog(chain_data_t *d)
+{
+    char url[160];
+    snprintf(url, sizeof(url), "%s/api/mempool", chain_base_url());
+    if (!chain_get(url))
+    {
+        return false;
+    }
+
+    double v = 0.0;
+    if (!json_get_double(s_http_buf, "\"count\":", &v) || v <= 0.0)
+    {
+        return false;
+    }
+    d->mempool_tx_count = (int32_t) v;
+    if (json_get_double(s_http_buf, "\"vsize\":", &v))     { d->mempool_vsize     = (int64_t) v; }
+    if (json_get_double(s_http_buf, "\"total_fee\":", &v)) { d->mempool_total_fee = (int64_t) v; }
+    return true;
+}
+
+/* A month of daily closes for the sparkline, in one 269 byte response. The
+ * vecs endpoint is bitview only, so on mempool.space this leaves the history
+ * empty and the price screen draws no chart rather than a misleading one. */
+static bool chain_fetch_price_history(chain_data_t *d)
+{
+    if (s_source != CHAIN_SRC_BITVIEW)
+    {
+        d->price_history_len = 0;
+        return false;
+    }
+
+    char url[220];
+    snprintf(url, sizeof(url), "%s/api/vecs/query?i=day1&ids=price_close&f=-%d",
+             chain_base_url(), CHAIN_PRICE_HISTORY);
+    if (!chain_get(url))
+    {
+        return false;
+    }
+
+    /* One series, so the body is a flat list of numbers: [64573.41,...]. */
+    const char *p = strchr(s_http_buf, '[');
+    if (!p)
+    {
+        return false;
+    }
+    p++;
+
+    int n = 0;
+    while (n < CHAIN_PRICE_HISTORY)
+    {
+        char *end = NULL;
+        const double v = strtod(p, &end);
+        if (end == p || !isfinite(v))
+        {
+            break;
+        }
+        d->price_history[n++] = (float) v;
+        p = end;
+        while (*p == ' ') { p++; }
+        if (*p != ',') { break; }
+        p++;
+    }
+    d->price_history_len = n;
+    return n > 0;
+}
+
+/* Balance of the watched address. Skipped entirely when none is set. */
+static bool chain_fetch_address(void)
+{
+    if (!s_addr.watching || !s_addr.address[0])
+    {
+        return false;
+    }
+
+    char url[200];
+    snprintf(url, sizeof(url), "%s/api/address/%s", chain_base_url(), s_addr.address);
+    if (!chain_get(url))
+    {
+        return false;
+    }
+
+    /* chain_stats comes before mempool_stats, and both carry a "balance" key,
+     * so read the confirmed one from the front and the pending delta from the
+     * mempool object rather than from the first match. */
+    double v = 0.0;
+    if (!json_get_double(s_http_buf, "\"balance\":", &v))
+    {
+        return false;
+    }
+
+    chain_address_t next = s_addr;
+    next.confirmed_sats = (int64_t) v;
+    if (json_get_double(s_http_buf, "\"tx_count\":", &v)) { next.tx_count = (int32_t) v; }
+
+    const char *mp = strstr(s_http_buf, "\"mempool_stats\"");
+    next.pending_sats = 0;
+    if (mp && json_get_double(mp, "\"balance_delta\":", &v))
+    {
+        next.pending_sats = (int64_t) v;
+    }
+    next.valid = true;
+
+    if (lvgl_port_lock(-1))
+    {
+        s_addr = next;
+        lvgl_port_unlock();
+    }
+    else
+    {
+        s_addr = next;
+    }
+    return true;
+}
+
 /* The tip height, for the halving countdown. Plain text on both providers. */
 static bool chain_fetch_tip(long long *height)
 {
@@ -504,6 +693,9 @@ static bool chain_fetch_once(void)
     }
 
     chain_fetch_retarget(&next);
+    chain_fetch_fees(&next);
+    chain_fetch_mempool_backlog(&next);
+    chain_fetch_price_history(&next);
 
     if (!got_chain && !next.valid)
     {
@@ -523,6 +715,8 @@ static bool chain_fetch_once(void)
     {
         s_data = next;
     }
+
+    chain_fetch_address();
 
     ESP_LOGI(TAG, "%s: diff %.4g, %d blocks to halving, retarget %+.2f%% in %d",
              chain_source_name(s_source), next.difficulty,

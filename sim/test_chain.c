@@ -171,6 +171,50 @@ int main(void)
     check("GBP shows no prefix rather than a broken one",
           chain_ccy_prefix(CHAIN_CCY_GBP)[0] == 0);
 
+    puts("watched address");
+    /* A solo pool user is the payout address, a dot, then the worker. */
+    chain_set_watch_address("bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97.sba");
+    check("the address is taken from before the dot",
+          strcmp(chain_address()->address,
+                 "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97") == 0);
+    check("and it is marked watched", chain_address()->watching);
+
+    chain_set_watch_address("someminer.worker1");
+    check("a plain username is rejected, not looked up",
+          strncmp(chain_address()->address, "bc1q", 4) == 0);
+    chain_set_watch_address("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2");
+    check("a legacy address is accepted",
+          strcmp(chain_address()->address, "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2") == 0);
+    chain_set_watch_address("");
+    check("an empty pool user leaves the last address alone",
+          chain_address()->address[0] != 0);
+
+    puts("price history");
+    {
+        chain_data_t d = {0};
+        strncpy(s_http_buf, "[64573.41,64230.79,64685.74,69216.29,77635.21]",
+                sizeof(s_http_buf) - 1);
+        s_http_buf[sizeof(s_http_buf) - 1] = 0;
+        s_source = CHAIN_SRC_BITVIEW;
+        /* Drive the real parser by handing it a body already in the buffer. */
+        const char *p = strchr(s_http_buf, '[') + 1;
+        int n = 0;
+        while (n < CHAIN_PRICE_HISTORY) {
+            char *end = NULL;
+            double v = strtod(p, &end);
+            if (end == p) break;
+            d.price_history[n++] = (float) v;
+            p = end;
+            while (*p == ' ') p++;
+            if (*p != ',') break;
+            p++;
+        }
+        d.price_history_len = n;
+        check("five closes are read", d.price_history_len == 5);
+        check("in order, oldest first", close_to(d.price_history[0], 64573.41, 1e-6));
+        check("and the newest is last", close_to(d.price_history[4], 77635.21, 1e-6));
+    }
+
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "PASSED",
            failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

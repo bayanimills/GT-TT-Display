@@ -41,6 +41,10 @@ typedef enum {
     CHAIN_CCY_COUNT
 } chain_ccy_t;
 
+/* Daily closes kept for the price sparkline: a month of context in a 269 byte
+ * response and 120 bytes of state. */
+#define CHAIN_PRICE_HISTORY 30
+
 typedef struct {
     /* Chain state. Zero means "not fetched yet"; check valid first. */
     double   difficulty;          /* current network difficulty */
@@ -59,9 +63,48 @@ typedef struct {
     double   retarget_progress_pct;
     int64_t  retarget_eta_seconds;
 
+    /* Recommended fees in sat/vB, from the route both providers serve. */
+    double   fee_fastest;
+    double   fee_half_hour;
+    double   fee_hour;
+    double   fee_economy;
+    double   fee_minimum;
+    bool     fees_valid;
+
+    /* Mempool backlog. The response carries a thousand-entry fee histogram
+     * after these three; the fetch buffer truncates it and nothing reads it. */
+    int32_t  mempool_tx_count;
+    int64_t  mempool_vsize;
+    int64_t  mempool_total_fee;
+
+    /* Daily USD closes, oldest last. Needs the time-series endpoint, so this
+     * stays empty on mempool.space and the sparkline hides itself. */
+    float    price_history[CHAIN_PRICE_HISTORY];
+    int      price_history_len;
+
     bool     valid;               /* a fetch has succeeded at least once */
     int64_t  fetched_at;          /* time() of that fetch, 0 if never */
 } chain_data_t;
+
+/* A watched address, for the payout screen.
+ *
+ * Set from the pool user the miner reports over BAP, which on a solo pool is
+ * the payout address with the worker name after a dot. Fetched on the same
+ * pass as everything else, so it costs one more request and no extra task. */
+typedef struct {
+    char     address[80];
+    int64_t  confirmed_sats;
+    int64_t  pending_sats;     /* mempool delta; negative when spending */
+    int32_t  tx_count;
+    bool     valid;            /* a lookup has succeeded */
+    bool     watching;         /* an address has been set */
+} chain_address_t;
+
+/* Ignores anything that is not a plausible mainnet address, so a pool user
+ * that is a plain username does not become a doomed lookup. Passing the same
+ * address twice is free. */
+void chain_set_watch_address(const char *addr);
+const chain_address_t *chain_address(void);
 
 /* Read NVS and start the refresh task. Safe to call once, from app_main. */
 void chain_init(void);

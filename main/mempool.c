@@ -60,6 +60,8 @@ typedef struct
 static lv_obj_t *mempool_screen = NULL;
 static lv_obj_t *mempool_status_label = NULL;
 static lv_obj_t *mempool_row = NULL;
+static lv_obj_t *mempool_fee_value[4] = { NULL, NULL, NULL, NULL };
+static lv_timer_t *mempool_fee_timer = NULL;
 static TaskHandle_t mempool_task_handle = NULL;
 static bool mempool_netif_ready = false;
 static bool mempool_log_tuned = false;
@@ -82,6 +84,9 @@ static void mempool_start_sntp(void);
 static bool mempool_time_ready(void);
 static void mempool_set_status(const char *status);
 static void mempool_rebuild_cards(void);
+static void mempool_build_fee_strip(lv_obj_t *host, bool glass);
+static void mempool_fee_timer_cb(lv_timer_t *t);
+static void mempool_refresh_fees(void);
 
 static bool json_get_ll(const char *obj, const char *key, long long *out);
 static bool json_get_double(const char *obj, const char *key, double *out);
@@ -156,14 +161,16 @@ void mempool_screen_create(void)
     lv_obj_align(mempool_status_label, LV_ALIGN_TOP_MID, 0, 48);
     if (glass) glass_pill_label(mempool_status_label, false);
 
+    mempool_build_fee_strip(mempool_screen, glass);
+
     mempool_row = lv_obj_create(mempool_screen);
-    const int row_y = 76;
+    const int row_y = 130;
     const int nav_h = glass ? 0 : 64;
     const int row_bottom_gap = 16;
     int row_h = SCREEN_HEIGHT - row_y - nav_h - row_bottom_gap;
-    if (row_h < 300)
+    if (row_h < 250)
     {
-        row_h = 300;
+        row_h = 250;
     }
     lv_obj_set_size(mempool_row, SCREEN_WIDTH, row_h);
     lv_obj_align(mempool_row, LV_ALIGN_TOP_MID, 0, row_y);
@@ -223,8 +230,118 @@ void mempool_screen_create(void)
     }
 }
 
+static void mempool_fee_timer_cb(lv_timer_t *t)
+{
+    (void) t;
+    mempool_refresh_fees();
+}
+
+/* Recommended fee bands and the size of the backlog behind them.
+ *
+ * The block cards below say what the last few blocks charged, which is history
+ * by the time you read it. This says what it would cost to get into the next
+ * one, which is the number anyone actually wants from a mempool screen. */
+static void mempool_build_fee_strip(lv_obj_t *host, bool glass)
+{
+    static const char *k_band[4] = { "FASTEST", "30 MIN", "1 HOUR", "ECONOMY" };
+
+    const int cell_w = 168;
+    const int gap    = 8;
+    const int x0     = (SCREEN_WIDTH - (cell_w * 4 + gap * 3)) / 2;
+    const int y      = 70;
+    const int h      = 52;
+
+    for (int i = 0; i < 4; i++)
+    {
+        lv_obj_t *cell;
+        if (glass)
+        {
+            cell = glass_pane(host, cell_w, h, 14);
+        }
+        else
+        {
+            cell = lv_obj_create(host);
+            lv_obj_set_size(cell, cell_w, h);
+            lv_obj_set_style_bg_color(cell, COLOR_CARD_BG, 0);
+            lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(cell, 1, 0);
+            lv_obj_set_style_border_color(cell, COLOR_BORDER, 0);
+            lv_obj_set_style_radius(cell, 10, 0);
+            lv_obj_set_style_shadow_width(cell, 0, 0);
+            lv_obj_set_style_pad_all(cell, 0, 0);
+            lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+        }
+        lv_obj_align(cell, LV_ALIGN_TOP_LEFT, x0 + i * (cell_w + gap), y);
+
+        lv_obj_t *cap = lv_label_create(cell);
+        lv_label_set_text(cap, k_band[i]);
+        lv_obj_set_style_text_color(cap, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(cap, &lv_font_montserrat_12, 0);
+        lv_obj_align(cap, LV_ALIGN_TOP_MID, 0, 7);
+
+        mempool_fee_value[i] = lv_label_create(cell);
+        lv_label_set_text(mempool_fee_value[i], "--");
+        lv_obj_set_style_text_color(mempool_fee_value[i], COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_font(mempool_fee_value[i], &lv_font_montserrat_22, 0);
+        lv_obj_align(mempool_fee_value[i], LV_ALIGN_TOP_MID, 0, 24);
+    }
+
+
+    mempool_fee_timer = lv_timer_create(mempool_fee_timer_cb, 3000, NULL);
+    mempool_refresh_fees();
+}
+
+/* Under a sat/vB the integer is a lie, so keep one decimal down there. */
+static void fmt_fee_rate(double v, char *buf, size_t n)
+{
+    if (v <= 0.0)      { snprintf(buf, n, "--"); }
+    else if (v < 10.0) { snprintf(buf, n, "%.1f", v); }
+    else               { snprintf(buf, n, "%.0f", v); }
+}
+
+static void mempool_refresh_fees(void)
+{
+    const chain_data_t *d = chain_data();
+    char buf[96];
+
+    const double band[4] = { d->fee_fastest, d->fee_half_hour, d->fee_hour, d->fee_economy };
+    for (int i = 0; i < 4; i++)
+    {
+        if (!mempool_fee_value[i]) continue;
+        if (d->fees_valid)
+        {
+            char n[16];
+            fmt_fee_rate(band[i], n, sizeof(n));
+            snprintf(buf, sizeof(buf), "%s sat/vB", n);
+        }
+        else
+        {
+            snprintf(buf, sizeof(buf), "--");
+        }
+        lv_label_set_text(mempool_fee_value[i], buf);
+    }
+
+    /* The backlog belongs with the status line: it is what the feed says
+     * about right now, and a row of its own cost the cards their captions. */
+    if (mempool_status_label && d->mempool_tx_count > 0)
+    {
+        char n[24];
+        chain_fmt_grouped(d->mempool_tx_count, n, sizeof(n));
+        snprintf(buf, sizeof(buf), "%s  -  %s waiting  -  %.1f vMB",
+                 chain_source_name(chain_get_source()), n,
+                 (double) d->mempool_vsize / 1000000.0);
+        lv_label_set_text(mempool_status_label, buf);
+    }
+}
+
 void mempool_screen_destroy(void)
 {
+    if (mempool_fee_timer)
+    {
+        lv_timer_del(mempool_fee_timer);
+        mempool_fee_timer = NULL;
+    }
+    for (int i = 0; i < 4; i++) { mempool_fee_value[i] = NULL; }
     if (mempool_screen)
     {
         glass_screen_detach(mempool_screen);
@@ -336,10 +453,7 @@ static void mempool_task(void *arg)
             {
                 /* Name the provider actually used, not the one that used to
                  * be hardcoded here. */
-                char status[48];
-                snprintf(status, sizeof(status), "LIVE (from %s)",
-                         chain_source_name(chain_get_source()));
-                mempool_set_status(status);
+                mempool_refresh_fees();
                 mempool_rebuild_cards();
                 lvgl_port_unlock();
                 vTaskDelay(pdMS_TO_TICKS(MEMPOOL_FETCH_INTERVAL_MS));
