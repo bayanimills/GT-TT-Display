@@ -63,6 +63,12 @@ static lv_obj_t *price_status_label = NULL;
 static TaskHandle_t price_task_handle = NULL;
 static bool price_netif_ready = false;
 
+/* lv_line does not copy its points, so the array has to outlive the call. */
+static lv_point_t  price_spark_pts[CHAIN_PRICE_HISTORY];
+static lv_obj_t   *price_spark_line = NULL;
+static lv_obj_t   *price_spark_range = NULL;
+static lv_timer_t *price_spark_timer = NULL;
+
 static char current_price_text[32] = "--";
 static char current_price_status[24] = "LOADING...";
 
@@ -78,6 +84,8 @@ static bool price_ensure_netif(void);
 static bool price_wifi_connected(void);
 static void format_price_with_commas(long long value, char *out, size_t out_size);
 static void price_set_status(const char *status);
+static void price_build_sparkline(lv_obj_t *parent, bool glass);
+static void price_refresh_sparkline(void);
 
 static char price_http_buf[PRICE_HTTP_BUF_SIZE];
 static int price_http_len = 0;
@@ -150,6 +158,87 @@ static esp_err_t price_http_event_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+#define SPARK_W 600
+#define SPARK_H 64
+
+static void price_spark_timer_cb(lv_timer_t *t)
+{
+    (void) t;
+    price_refresh_sparkline();
+}
+
+/* A month of daily closes under the figure. The price alone says nothing
+ * about direction, which is most of what anyone glancing at it wants. */
+static void price_build_sparkline(lv_obj_t *parent, bool glass)
+{
+    price_spark_line = lv_line_create(parent);
+    lv_obj_set_size(price_spark_line, SPARK_W, SPARK_H);
+    lv_obj_set_style_line_width(price_spark_line, 2, 0);
+    lv_obj_set_style_line_color(price_spark_line, COLOR_ACCENT, 0);
+    lv_obj_set_style_line_rounded(price_spark_line, true, 0);
+    lv_obj_align(price_spark_line, LV_ALIGN_BOTTOM_MID, 0, glass ? -36 : -96);
+    lv_obj_add_flag(price_spark_line, LV_OBJ_FLAG_HIDDEN);
+
+    price_spark_range = lv_label_create(parent);
+    lv_label_set_text(price_spark_range, "");
+    lv_obj_set_style_text_color(price_spark_range, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(price_spark_range, &lv_font_montserrat_14, 0);
+    lv_obj_align(price_spark_range, LV_ALIGN_BOTTOM_MID, 0, glass ? -10 : -74);
+
+    price_spark_timer = lv_timer_create(price_spark_timer_cb, 5000, NULL);
+    price_refresh_sparkline();
+}
+
+static void price_refresh_sparkline(void)
+{
+    if (!price_spark_line || !price_spark_range)
+    {
+        return;
+    }
+
+    const chain_data_t *d = chain_data();
+    const int n = d->price_history_len;
+
+    /* Two points is the fewest that can show a direction, and the closes are
+     * bitview only, so the classic case for hiding this is mempool.space. */
+    if (n < 2)
+    {
+        lv_obj_add_flag(price_spark_line, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(price_spark_range, "");
+        return;
+    }
+
+    float lo = d->price_history[0];
+    float hi = d->price_history[0];
+    for (int i = 1; i < n; i++)
+    {
+        if (d->price_history[i] < lo) lo = d->price_history[i];
+        if (d->price_history[i] > hi) hi = d->price_history[i];
+    }
+
+    const float span = (hi > lo) ? (hi - lo) : 1.0f;
+    for (int i = 0; i < n; i++)
+    {
+        price_spark_pts[i].x = (lv_coord_t) (i * (SPARK_W - 1) / (n - 1));
+        /* A flat month would otherwise pin to the top; centre it instead. */
+        const float t = (hi > lo) ? (d->price_history[i] - lo) / span : 0.5f;
+        price_spark_pts[i].y = (lv_coord_t) ((1.0f - t) * (SPARK_H - 1));
+    }
+
+    lv_line_set_points(price_spark_line, price_spark_pts, (uint16_t) n);
+    lv_obj_clear_flag(price_spark_line, LV_OBJ_FLAG_HIDDEN);
+
+    /* The chart has no axis, so the extremes have to be written down or the
+     * shape is unreadable: the same curve fits any pair of numbers. */
+    char lo_s[24], hi_s[24], buf[72];
+    chain_fmt_grouped((long) (lo * chain_fx_to_usd() + 0.5), lo_s, sizeof(lo_s));
+    chain_fmt_grouped((long) (hi * chain_fx_to_usd() + 0.5), hi_s, sizeof(hi_s));
+    snprintf(buf, sizeof(buf), "%d days   %s%s  to  %s%s", n,
+             chain_ccy_prefix(chain_get_ccy()), lo_s,
+             chain_ccy_prefix(chain_get_ccy()), hi_s);
+    lv_label_set_text(price_spark_range, buf);
+}
+
 void price_screen_create(void)
 {
     if (price_screen != NULL)
@@ -180,14 +269,14 @@ void price_screen_create(void)
                           chain_ccy_code(chain_get_ccy()));
     lv_obj_set_style_text_color(price_title_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(price_title_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(price_title_label, LV_ALIGN_TOP_MID, 0, 30);
+    lv_obj_align(price_title_label, LV_ALIGN_TOP_MID, 0, glass ? 12 : 30);
 
     price_status_label = lv_label_create(parent);
     lv_label_set_text(price_status_label, current_price_status);
     lv_obj_set_style_text_color(price_status_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_opa(price_status_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(price_status_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(price_status_label, LV_ALIGN_TOP_MID, 0, 58);
+    lv_obj_align(price_status_label, LV_ALIGN_TOP_MID, 0, glass ? 38 : 58);
 
     price_value_cont = lv_obj_create(parent);
     lv_obj_set_size(price_value_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -197,7 +286,7 @@ void price_screen_create(void)
     lv_obj_set_style_pad_column(price_value_cont, 10, 0);
     lv_obj_set_flex_flow(price_value_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(price_value_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_align(price_value_cont, LV_ALIGN_CENTER, 0, glass ? 14 : -10);
+    lv_obj_align(price_value_cont, LV_ALIGN_CENTER, 0, glass ? -22 : -10);
     if (glass)
     {
         lv_obj_clear_flag(price_value_cont, LV_OBJ_FLAG_CLICKABLE);
@@ -224,6 +313,8 @@ void price_screen_create(void)
     lv_obj_set_style_text_color(price_suffix_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_opa(price_suffix_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(price_suffix_label, &lv_font_montserrat_48, 0);
+
+    price_build_sparkline(parent, glass);
 
     if (glass)
     {
@@ -268,6 +359,13 @@ void price_screen_create(void)
 
 void price_screen_destroy(void)
 {
+    if (price_spark_timer)
+    {
+        lv_timer_del(price_spark_timer);
+        price_spark_timer = NULL;
+    }
+    price_spark_line = NULL;
+    price_spark_range = NULL;
     if (price_screen)
     {
         glass_screen_detach(price_screen);
