@@ -162,7 +162,8 @@ void mempool_screen_create(void)
     lv_obj_set_style_pad_bottom(mempool_row, 0, 0);
     lv_obj_set_style_pad_column(mempool_row, 24, 0);
     lv_obj_set_scroll_dir(mempool_row, LV_DIR_HOR);
-    lv_obj_set_scrollbar_mode(mempool_row, LV_SCROLLBAR_MODE_AUTO);
+    /* Glass has no chrome, so the row still scrolls but draws no scrollbar. */
+    lv_obj_set_scrollbar_mode(mempool_row, glass ? LV_SCROLLBAR_MODE_OFF : LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_flex_flow(mempool_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(mempool_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 

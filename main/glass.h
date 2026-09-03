@@ -99,6 +99,11 @@ lv_obj_t *glass_pane(lv_obj_t *parent, int w, int h, int radius);
  * open the drawer like taps on the screen do. */
 void glass_attach_drawer_toggle(lv_obj_t *obj);
 
+/* A screen may claim the tap that would otherwise toggle the drawer: the
+ * callback returns true to swallow it (e.g. the Wi-Fi keyboard dismissing on
+ * the first outside tap). Cleared when the screen is detached. */
+void glass_set_tap_interceptor(bool (*cb)(void));
+
 /* Keep pane crops aimed while `obj` scrolls (panes are children of it). */
 void glass_track_scroll(lv_obj_t *obj);
 

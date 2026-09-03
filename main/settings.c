@@ -169,6 +169,16 @@ static void update_performance_buttons(void)
     if (!performance_low_btn || !performance_medium_btn || !performance_high_btn)
         return;
 
+    if (glass_active())
+    {
+        /* Glass buttons are restyled whole; the classic colour swaps below
+         * would leave them half in each material. */
+        glass_style_button(performance_low_btn, current_settings.performance_mode == PERFORMANCE_LOW);
+        glass_style_button(performance_medium_btn, current_settings.performance_mode == PERFORMANCE_MEDIUM);
+        glass_style_button(performance_high_btn, current_settings.performance_mode == PERFORMANCE_HIGH);
+        return;
+    }
+
     lv_obj_set_style_bg_color(performance_low_btn, COLOR_CARD_BG, 0);
     lv_obj_t *low_label = lv_obj_get_child(performance_low_btn, 0);
     if (low_label)

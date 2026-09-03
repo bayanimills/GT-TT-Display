@@ -457,6 +457,28 @@ static lv_obj_t* create_bottom_nav_btn_img(lv_obj_t* parent, const lv_img_dsc_t 
     return btn;
 }
 
+/* When the keyboard hides because the user tapped elsewhere, that tap must not
+ * also open the Glass drawer. The press that defocuses the field lands before
+ * the click reaches the screen, so remember when the keyboard went away and
+ * let glass ask whether the click it is about to act on was that same tap. */
+static uint32_t keyboard_dismiss_tick = 0;
+static bool keyboard_dismissed_recently = false;
+
+static bool wifi_glass_tap_interceptor(void)
+{
+    if (keyboard && !lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+        if (password_ta) lv_obj_clear_state(password_ta, LV_STATE_FOCUSED);
+        return true;
+    }
+    if (keyboard_dismissed_recently && lv_tick_elaps(keyboard_dismiss_tick) < 600) {
+        keyboard_dismissed_recently = false;
+        return true;
+    }
+    keyboard_dismissed_recently = false;
+    return false;
+}
+
 // Text area event handler for keyboard show/hide
 static void ta_event_handler(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
@@ -484,6 +506,8 @@ static void ta_event_handler(lv_event_t *e) {
             }
             if(!kb_focused){
                  lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+                 keyboard_dismiss_tick = lv_tick_get();
+                 keyboard_dismissed_recently = true;
             }
         }
     }
@@ -723,7 +747,10 @@ lv_textarea_set_password_mode(password_ta, true);
     keyboard = lv_keyboard_create(wifi_screen);
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(keyboard, keyboard_event_cb, LV_EVENT_ALL, NULL);
-    if (glass) glass_style_keyboard(keyboard);
+    if (glass) {
+        glass_style_keyboard(keyboard);
+        glass_set_tap_interceptor(wifi_glass_tap_interceptor);
+    }
 
     if (glass) {
         if (wifi_connect_pending) {

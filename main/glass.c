@@ -116,6 +116,7 @@ static lv_obj_t      *s_host      = NULL;
 static glass_screen_t s_host_kind = GLASS_SCREEN_HOME;
 static bool           s_host_dim  = false;
 static lv_obj_t      *s_host_wall = NULL;
+static bool         (*s_tap_interceptor)(void) = NULL;
 
 /* Home surface. */
 static lv_obj_t *s_screen       = NULL;
@@ -1159,6 +1160,7 @@ static void drawer_toggle_cb(lv_event_t *e)
 {
     (void) e;
     if (s_sheet != GLASS_SHEET_NONE) return;
+    if (s_tap_interceptor && s_tap_interceptor()) return;
     if (s_drawer_open) glass_drawer_close();
     else               glass_drawer_open();
 }
@@ -1166,6 +1168,11 @@ static void drawer_toggle_cb(lv_event_t *e)
 void glass_attach_drawer_toggle(lv_obj_t *obj)
 {
     lv_obj_add_event_cb(obj, drawer_toggle_cb, LV_EVENT_CLICKED, NULL);
+}
+
+void glass_set_tap_interceptor(bool (*cb)(void))
+{
+    s_tap_interceptor = cb;
 }
 
 static void drawer_anim_cb(void *obj, int32_t v)
@@ -1707,6 +1714,7 @@ void glass_screen_detach(lv_obj_t *scr)
         s_host = NULL;
         s_host_wall = NULL;
         s_host_dim = false;
+        s_tap_interceptor = NULL;
     }
 }
 
