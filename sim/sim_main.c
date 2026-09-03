@@ -322,6 +322,47 @@ static void handle_command(char *line)
         s_dirty = true;
         break;
 
+    case 'Z': {
+        /* Time a screen change end to end: build, load, tear down the old
+         * one, then repaint. That is the spike a user feels when navigating,
+         * and it is a different cost from the steady state repaint 'M'
+         * measures. */
+        char name[24] = { 0 };
+        int reps = 0;
+        sscanf(arg, "%23s %d", name, &reps);
+        if (reps <= 0) reps = 8;
+        int idx = -1;
+        for (int i = 0; i < SCREEN_COUNT; i++) {
+            if (strcmp(k_screens[i].name, name) == 0) { idx = i; break; }
+        }
+        if (idx < 0) { ESP_LOGW(TAG, "Z: no screen %s", name); break; }
+
+        /* Alternate with home so each pass really rebuilds. */
+        int home = 0;
+        for (int i = 0; i < SCREEN_COUNT; i++) {
+            if (strcmp(k_screens[i].name, "home") == 0) { home = i; break; }
+        }
+
+        double total = 0.0, lo = 1e9, hi = 0.0;
+        for (int i = 0; i < reps; i++) {
+            lvgl_port_lock(-1);
+            sim_goto(home);
+            lv_refr_now(NULL);
+            struct timespec a, b;
+            clock_gettime(CLOCK_MONOTONIC, &a);
+            sim_goto(idx);
+            lv_refr_now(NULL);
+            clock_gettime(CLOCK_MONOTONIC, &b);
+            lvgl_port_unlock();
+            double ms = (b.tv_sec - a.tv_sec) * 1000.0 + (b.tv_nsec - a.tv_nsec) / 1000000.0;
+            total += ms; if (ms < lo) lo = ms; if (ms > hi) hi = ms;
+        }
+        ESP_LOGI(TAG, "SWITCH to %s x%d: mean %.2f ms  min %.2f  max %.2f",
+                 name, reps, total / reps, lo, hi);
+        s_dirty = true;
+        break;
+    }
+
     case 'M': {
         /* Time full repaints of the active screen.
          *
