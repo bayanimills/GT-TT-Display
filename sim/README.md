@@ -124,6 +124,12 @@ Frames come back on stdout as `"GTFB" | u32 frame | u16 w | u16 h | RGB565 LE`.
 
 ## Caveats
 
+- The TCP/IP stack is modelled as a precondition, not faked. A fetch made
+  before `esp_netif_init()` aborts here with the same diagnosis lwIP gives
+  on hardware, where it asserts and the board reboots in a loop. That fault
+  shipped once, because this file used to answer every fetch from `curl` on
+  an always-online host. `SIM_ALLOW_UNINIT_NETIF=1` downgrades it to a
+  warning for poking at a screen without standing up its fetch path.
 - The sim renders with LVGL's software renderer at host speed; it is not a
   timing model of the ESP32-S3. Layout, colour and touch behaviour are faithful,
   frame pacing is not.

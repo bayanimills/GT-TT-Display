@@ -418,6 +418,45 @@ esp_err_t esp_wifi_set_ps(wifi_ps_type_t t) { (void) t; return ESP_OK; }
 
 /* ---------------- HTTP client (shells out to curl) ---------------- */
 
+/* On the device, using a socket before esp_netif_init() does not return an
+ * error: lwIP asserts and the board reboots.
+ *
+ *   assert failed: tcpip_send_msg_wait_sem tcpip.c:454 (Invalid mbox)
+ *
+ * This simulator used to answer every fetch from curl on an always-online
+ * host, so a task that fetched before the stack was up passed here and boot
+ * looped on hardware. That happened, to chain.c. Model the precondition so
+ * the fault surfaces on a workstation instead of on a panel.
+ *
+ * SIM_ALLOW_UNINIT_NETIF=1 downgrades this to a warning, for poking at a
+ * screen in isolation without standing up its fetch path. */
+static bool s_netif_ready = false;
+
+esp_err_t esp_netif_init(void)
+{
+    s_netif_ready = true;
+    return ESP_OK;
+}
+
+static bool sim_require_netif(const char *url)
+{
+    if (s_netif_ready) return true;
+    if (getenv("SIM_ALLOW_UNINIT_NETIF")) {
+        ESP_LOGW(TAG, "fetch before esp_netif_init(): %s (panics on hardware)", url);
+        return true;
+    }
+    fprintf(stderr,
+            "\nSIM: assert failed: tcpip_send_msg_wait_sem (Invalid mbox)\n");
+    fprintf(stderr, "SIM: %s was fetched before esp_netif_init() was called.\n", url);
+    fprintf(stderr,
+            "SIM: on hardware lwIP asserts here and the board reboots in a loop.\n");
+    fprintf(stderr,
+            "SIM: guard the fetch with ensure_netif() and a wifi check, as\n");
+    fprintf(stderr,
+            "SIM: price.c and mempool.c do. SIM_ALLOW_UNINIT_NETIF=1 warns instead.\n\n");
+    abort();
+}
+
 struct esp_http_client {
     esp_http_client_config_t cfg;
     char   url[512];
@@ -441,6 +480,7 @@ static esp_err_t http_fetch(struct esp_http_client *c)
     c->body_len = 0;
     c->read_off = 0;
     c->status = 0;
+    if (!sim_require_netif(c->url)) { c->status = 597; return ESP_FAIL; }
     if (getenv("SIM_OFFLINE")) { c->status = 599; return ESP_FAIL; }
 
     int secs = c->cfg.timeout_ms > 0 ? c->cfg.timeout_ms / 1000 + 1 : 10;
