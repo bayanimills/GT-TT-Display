@@ -39,9 +39,10 @@ void app_main()
     /* Timezone must be applied before the display schedule can be judged. */
     settings_initialize();
 
-    /* Starts the chain refresh task. It retries on its own until Wi-Fi is up,
-     * so it costs nothing to start before the radio is associated, and the
-     * odds screen has a snapshot waiting the first time it is opened. */
+    /* Starts the chain refresh task. It waits for the TCP/IP stack and an
+     * associated radio before its first fetch, so the odds screen has a
+     * snapshot waiting the first time it is opened without the task touching
+     * lwIP before there is a stack to touch. */
     chain_init();
 
     ESP_LOGI(TAG, "BAP Touch Display -- Build by WantClue with Love");

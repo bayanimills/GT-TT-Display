@@ -4,6 +4,9 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "lvgl_port.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "wifi.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
@@ -68,6 +71,7 @@ static char         s_http_buf[CHAIN_HTTP_BUF_SIZE];
 static int          s_http_len = 0;
 static TaskHandle_t s_task = NULL;
 static chain_address_t s_addr;
+static bool s_netif_ready = false;
 
 /* ---- preferences ---- */
 
@@ -345,6 +349,32 @@ static esp_err_t chain_http_event(esp_http_client_event_t *evt)
         }
     }
     return ESP_OK;
+}
+
+/* Bring the TCP/IP stack up and confirm the radio is associated.
+ *
+ * Without this the first fetch runs before lwIP has a mailbox and the stack
+ * asserts rather than returning an error: "tcpip_send_msg_wait_sem ... Invalid
+ * mbox", which panics and reboots. price.c and mempool.c have always guarded
+ * their fetch loops this way; this one did not, and a simulator cannot show it
+ * because there esp_http_client is curl, which does not care about a netif. */
+static bool chain_net_ready(void)
+{
+    if (!s_netif_ready)
+    {
+        esp_err_t ret = esp_netif_init();
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
+        {
+            return false;
+        }
+        ret = esp_event_loop_create_default();
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
+        {
+            return false;
+        }
+        s_netif_ready = true;
+    }
+    return wifi_is_connected();
 }
 
 /* GET into s_http_buf. False on transport error, non-2xx, or an empty body.
@@ -750,6 +780,12 @@ static void chain_task(void *arg)
     (void)arg;
     for (;;)
     {
+        if (!chain_net_ready())
+        {
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+
         const bool ok = chain_fetch_once();
         const uint32_t wait_ms = ok ? CHAIN_REFRESH_MS : CHAIN_RETRY_MS;
         /* A source change notifies us, so a switch takes effect at once
