@@ -303,6 +303,37 @@ static void handle_command(char *line)
         s_dirty = true;
         break;
     }
+    case 'M': {
+        /* Time full repaints of the active screen.
+         *
+         * The host renderer is not the ESP32-S3, so the absolute numbers mean
+         * nothing. What survives the move is the ratio between configurations:
+         * the same LVGL software rasteriser draws the same widget tree either
+         * way, so if a shadow costs four times the rest of a screen here it
+         * costs roughly that there too, and that is what decides where to
+         * spend effort. */
+        int n = atoi(arg);
+        if (n <= 0) n = 30;
+        double total = 0.0, lo = 1e9, hi = 0.0;
+        for (int i = 0; i < n; i++) {
+            struct timespec a, b;
+            lvgl_port_lock(-1);
+            lv_obj_invalidate(lv_scr_act());
+            clock_gettime(CLOCK_MONOTONIC, &a);
+            lv_refr_now(NULL);
+            clock_gettime(CLOCK_MONOTONIC, &b);
+            lvgl_port_unlock();
+            double ms = (b.tv_sec - a.tv_sec) * 1000.0 +
+                        (b.tv_nsec - a.tv_nsec) / 1000000.0;
+            total += ms;
+            if (ms < lo) lo = ms;
+            if (ms > hi) hi = ms;
+        }
+        ESP_LOGI(TAG, "MEASURE %d frames: mean %.2f ms  min %.2f  max %.2f",
+                 n, total / n, lo, hi);
+        s_dirty = true;
+        break;
+    }
     case 'R':
         lv_obj_invalidate(lv_scr_act());
         s_dirty = true;

@@ -75,6 +75,9 @@ def main():
                 sim.latest_frame(settle=0.8)
             elif kind == "wait":
                 sim.latest_frame(settle=float(val))
+            elif kind == "log":
+                # Drain stderr so a MEASURE line can be read back.
+                sim.latest_frame(settle=float(val) if val else 1.0)
             elif kind == "shot":
                 frame = sim.fresh_frame()
                 if frame is None:

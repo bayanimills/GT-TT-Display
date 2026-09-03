@@ -285,7 +285,11 @@
  *-----------*/
 
 /*1: Show CPU usage and FPS count*/
-#define LV_USE_PERF_MONITOR 0
+/* On-screen FPS and CPU load. Diagnostic: the host simulator renders into
+ * ordinary RAM while the panel renders into PSRAM framebuffers in direct
+ * mode, so the simulator cannot measure what actually limits the panel.
+ * Only the device can answer that, and this is how it answers. */
+#define LV_USE_PERF_MONITOR 1
 #if LV_USE_PERF_MONITOR
     #define LV_USE_PERF_MONITOR_POS LV_ALIGN_BOTTOM_RIGHT
 #endif
