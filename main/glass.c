@@ -13,6 +13,7 @@
 #include "wifi.h"
 #include "settings.h"
 #include "night.h"
+#include "display_control.h"
 #include "custom_fonts.h"
 #include "assets/glass_icons.h"
 #include "lvgl__lvgl/src/extra/libs/qrcode/lv_qrcode.h"
@@ -116,7 +117,9 @@ static lv_obj_t      *s_host      = NULL;
 static glass_screen_t s_host_kind = GLASS_SCREEN_HOME;
 static bool           s_host_dim  = false;
 static lv_obj_t      *s_host_wall = NULL;
-static bool         (*s_tap_interceptor)(void) = NULL;
+#define TAP_INTERCEPTOR_MAX 4
+static bool         (*s_tap_interceptor[TAP_INTERCEPTOR_MAX])(void);
+static int            s_tap_interceptor_count = 0;
 
 /* Home surface. */
 static lv_obj_t *s_screen       = NULL;
@@ -967,8 +970,15 @@ static void build_hero(card_t *c)
     lv_obj_t *card = glass_panel_create(s_grid, CONTENT_W, HERO_H, CARD_RADIUS);
     c->card = card;
 
+    /* The display-off control floats over the top corners. When it is
+     * visible the hero yields that corner, so nothing sits under it. */
+    display_control_config_t dc;
+    display_control_get_config(&dc);
+    bool corner_left  = dc.power_button_visuals_visible && dc.power_button_corner == DISPLAY_POWER_BUTTON_TOP_LEFT;
+    bool corner_right = dc.power_button_visuals_visible && dc.power_button_corner != DISPLAY_POWER_BUTTON_TOP_LEFT;
+
     lv_obj_t *cap = glass_caption(card, widget_caption(c->id));
-    lv_obj_set_pos(cap, 26, 18);
+    lv_obj_set_pos(cap, corner_left ? 26 + 60 : 26, 18);
 
     c->value = glass_label(card, "--", &montserrat_120, LV_OPA_COVER);
     lv_obj_align(c->value, LV_ALIGN_LEFT_MID, 22, 14);
@@ -977,11 +987,12 @@ static void build_hero(card_t *c)
     c->unit = glass_label(card, "GH/s", &lv_font_montserrat_26, LV_OPA_COVER);
     lv_obj_set_user_data(c->unit, MARK_ACCENT);
 
+    int aux_x = corner_right ? -26 - 60 : -26;
     c->aux = glass_label(card, "-- J/TH", &lv_font_montserrat_28, LV_OPA_COVER);
-    lv_obj_align(c->aux, LV_ALIGN_TOP_RIGHT, -26, 18);
+    lv_obj_align(c->aux, LV_ALIGN_TOP_RIGHT, aux_x, 18);
     lv_obj_t *aux_cap = glass_caption(card, "EFFICIENCY");
     lv_obj_set_style_text_font(aux_cap, &lv_font_montserrat_12, 0);
-    lv_obj_align(aux_cap, LV_ALIGN_TOP_RIGHT, -26, 54);
+    lv_obj_align(aux_cap, LV_ALIGN_TOP_RIGHT, aux_x, 54);
 
     c->sub = glass_subvalue(card, "");
     lv_obj_align(c->sub, LV_ALIGN_BOTTOM_RIGHT, -26, -18);
@@ -1160,7 +1171,9 @@ static void drawer_toggle_cb(lv_event_t *e)
 {
     (void) e;
     if (s_sheet != GLASS_SHEET_NONE) return;
-    if (s_tap_interceptor && s_tap_interceptor()) return;
+    for (int i = 0; i < s_tap_interceptor_count; i++) {
+        if (s_tap_interceptor[i] && s_tap_interceptor[i]()) return;
+    }
     if (s_drawer_open) glass_drawer_close();
     else               glass_drawer_open();
 }
@@ -1172,7 +1185,11 @@ void glass_attach_drawer_toggle(lv_obj_t *obj)
 
 void glass_set_tap_interceptor(bool (*cb)(void))
 {
-    s_tap_interceptor = cb;
+    if (!cb || s_tap_interceptor_count >= TAP_INTERCEPTOR_MAX) return;
+    for (int i = 0; i < s_tap_interceptor_count; i++) {
+        if (s_tap_interceptor[i] == cb) return;
+    }
+    s_tap_interceptor[s_tap_interceptor_count++] = cb;
 }
 
 static void drawer_anim_cb(void *obj, int32_t v)
@@ -1691,6 +1708,7 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
     s_host_kind = kind;
     s_host_dim  = dim;
     s_host_wall = NULL;
+    display_control_refresh_skin();
 
     const lv_img_dsc_t *sharp = wallpaper_image(WALLPAPER_SHARP);
     if (sharp) {
@@ -1714,7 +1732,7 @@ void glass_screen_detach(lv_obj_t *scr)
         s_host = NULL;
         s_host_wall = NULL;
         s_host_dim = false;
-        s_tap_interceptor = NULL;
+        s_tap_interceptor_count = 0;
     }
 }
 

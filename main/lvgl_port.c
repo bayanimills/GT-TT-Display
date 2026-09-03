@@ -10,6 +10,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_touch.h"
+#include "display_control.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
@@ -445,9 +446,11 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
     if (touchpad_pressed && touchpad_cnt > 0) {
         data->point.x = touchpad_x; // Set the X coordinate
         data->point.y = touchpad_y; // Set the Y coordinate
-        data->state = LV_INDEV_STATE_PRESSED; // Set state to pressed
+        /* A touch while dark wakes the display and is swallowed until release. */
+        data->state = display_control_filter_touch(true) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
         ESP_LOGD(TAG, "Touch position: %d,%d", touchpad_x, touchpad_y); // Log touch position
     } else {
+        display_control_filter_touch(false);
         data->state = LV_INDEV_STATE_RELEASED; // Set state to released
     }
 }

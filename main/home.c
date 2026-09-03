@@ -7,6 +7,7 @@
 #include "price.h"
 #include "mempool.h"
 #include "glass.h"
+#include "display_control.h"
 #include "stdio.h"
 #include "string.h"
 #include "custom_fonts.h"
@@ -436,6 +437,7 @@ void home_screen_create(void)
         return;
     }
 
+    display_control_refresh_skin();
     home_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(home_screen, COLOR_BACKGROUND, 0);
     lv_obj_set_style_bg_opa(home_screen, LV_OPA_COVER, 0);

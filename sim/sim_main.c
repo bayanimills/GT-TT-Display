@@ -15,6 +15,7 @@
  *           N <screen>        navigate: home night block clock price mempool wifi settings
  *           K <skin>          select skin (0 classic, 1 glass); home rebuilds on next N home
  *           G <what> <val>    glass: layout 0|1, widgets <hex>, wall <i>, drawer 0|1, sheet 0..4
+ *           D off | D mode <0..3>   display off / display-off button mode
  *           R                 force full repaint
  *           Q                 quit
  */
@@ -47,6 +48,7 @@
 #include "settings.h"
 #include "loading.h"
 #include "bap_parser.h"
+#include "display_control.h"
 
 #define H_RES 800
 #define V_RES 480
@@ -83,7 +85,8 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     (void) drv;
     data->point.x = s_touch_x;
     data->point.y = s_touch_y;
-    data->state   = s_touch_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    /* Same gate as lvgl_port.c: a touch while dark wakes and is swallowed. */
+    data->state   = display_control_filter_touch(s_touch_down) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
 /* ---------------- port shims the UI expects ---------------- */
@@ -270,6 +273,25 @@ static void handle_command(char *line)
         s_dirty = true;
         break;
     }
+    case 'D': {
+        /* Display control: "D off" turns the backlight off as the corner
+         * button would; "D mode <0..3>" picks the button mode (visible
+         * right/left, hidden right/left) through the same setter settings uses. */
+        char what[16] = { 0 };
+        int val = 0;
+        if (sscanf(arg, "%15s %d", what, &val) < 1) break;
+        if (strcmp(what, "off") == 0) {
+            display_control_turn_off();
+        } else if (strcmp(what, "mode") == 0) {
+            display_control_config_t cfg;
+            display_control_get_config(&cfg);
+            cfg.power_button_corner = display_button_mode_corner((display_power_button_mode_t) val);
+            cfg.power_button_visuals_visible = display_button_mode_shows_visuals((display_power_button_mode_t) val);
+            display_control_set_config(&cfg);
+        }
+        s_dirty = true;
+        break;
+    }
     case 'R':
         lv_obj_invalidate(lv_scr_act());
         s_dirty = true;
@@ -315,7 +337,20 @@ static void emit_frame(void)
     head[10] = (uint8_t) (V_RES & 0xFF);
     head[11] = (uint8_t) (V_RES >> 8);
     fwrite(head, 1, sizeof(head), stdout);
-    fwrite(s_fb, 2, H_RES * V_RES, stdout);
+    if (display_control_is_backlight_on()) {
+        fwrite(s_fb, 2, H_RES * V_RES, stdout);
+    } else {
+        /* The panel keeps its pixels when the backlight is off; show the
+         * frame at a fifth of its brightness so a dark display is visible
+         * in screenshots without pretending the content went away. */
+        static uint16_t dim[H_RES * V_RES];
+        for (int i = 0; i < H_RES * V_RES; i++) {
+            uint16_t v = s_fb[i];
+            uint16_t r = ((v >> 11) & 0x1F) / 5, g = ((v >> 5) & 0x3F) / 5, b = (v & 0x1F) / 5;
+            dim[i] = (uint16_t) ((r << 11) | (g << 5) | b);
+        }
+        fwrite(dim, 2, H_RES * V_RES, stdout);
+    }
     fflush(stdout);
 }
 
@@ -355,8 +390,10 @@ int main(void)
     report_mem("boot");
 
     /* Boot exactly like the device does. */
+    settings_initialize();
     if (lvgl_port_lock(-1)) {
         loading();
+        display_control_init();
         lvgl_port_unlock();
     }
 

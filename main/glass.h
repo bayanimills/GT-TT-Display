@@ -101,7 +101,10 @@ void glass_attach_drawer_toggle(lv_obj_t *obj);
 
 /* A screen may claim the tap that would otherwise toggle the drawer: the
  * callback returns true to swallow it (e.g. the Wi-Fi keyboard dismissing on
- * the first outside tap). Cleared when the screen is detached. */
+ * the first outside tap). Interceptors form a small chain asked in the order
+ * registered; the first to return true wins. All are cleared when the screen
+ * is detached. Waking from a dark display is not an interceptor: it is gated
+ * below LVGL in display_control_filter_touch(), so it always wins. */
 void glass_set_tap_interceptor(bool (*cb)(void));
 
 /* Keep pane crops aimed while `obj` scrolls (panes are children of it). */

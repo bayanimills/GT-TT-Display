@@ -2,6 +2,7 @@
 #include "loading.h"
 #include "theme.h"
 #include "settings.h"
+#include "display_control.h"
 
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -60,6 +61,8 @@ void app_main()
 
     waveshare_esp32_s3_rgb_lcd_init();
     wavesahre_rgb_lcd_bl_on();
+    /* Timezone must be applied before the display schedule can be judged. */
+    settings_initialize();
 
     ESP_LOGI(TAG, "BAP Touch Display -- Build by WantClue with Love");
     ESP_LOGI(TAG, "theme: %s", theme_get_name());
@@ -68,6 +71,7 @@ void app_main()
     if (lvgl_port_lock(-1)) {
         // screen init
         loading();
+        ESP_ERROR_CHECK(display_control_init());
 
         // Release the mutex
         lvgl_port_unlock();

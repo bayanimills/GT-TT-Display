@@ -93,6 +93,7 @@ G <what> <value>    glass skin: layout 0|1, widgets <hexmask>, wall <index>,
                     drawer 0|1, sheet 0..5 (widgets, layout, wallpaper, pool,
                     icons), scroll <px>
 N <screen>          home night block clock price mempool wifi settings
+D off | D mode <n>  display off (as the corner control); button mode 0..3
 R                   force repaint
 Q                   quit
 ```

@@ -118,7 +118,7 @@ The primary screen displays real-time mining information:
 ### Settings Interface (`settings.c`)
 Comprehensive configuration options:
 
-- **Display Settings**: Brightness control (0-100%), screen timeout
+- **Display Settings**: Brightness control, manual backlight power, and an optional daily on/off schedule
 - **Mining Parameters**: Frequency, voltage, fan control
 - **Network Config**: WiFi SSID/password setup
 - **Hardware Control**: ASIC voltage, automatic fan control
@@ -201,6 +201,29 @@ uint8_t current = lcd_backlight_get_brightness();
 - Resolution: 10-bit (1024 levels)
 - Hardware: GPIO15 → TPS61161 CTRL pin
 - Display Enable: GPIO12 (always HIGH)
+
+### Display Power and Schedule
+
+- Tap the power icon in either upper corner to turn off the backlight. The upper-right is the default, and Settings can move it to the upper-left.
+- The visible icon is 44 by 44 pixels with a 56 by 56 pixel touch zone, inset 8 pixels from the top and selected side.
+- Touch anywhere while the screen is dark to wake it. The wake touch is consumed so it cannot activate an unseen control.
+- Enable a daily schedule in Settings and choose on/off times in 30-minute increments.
+- Overnight schedules are supported. A touch wake during scheduled darkness keeps the display on for ten minutes.
+- Schedule settings are stored locally and remain configured after reboot.
+- If network time is not yet available, the display stays on until the clock synchronizes.
+
+The backlight is disabled without stopping the LCD, touchscreen, BAP data updates, or the LVGL interface.
+
+### Display Schedule Unit Test
+
+The minute-of-day schedule logic can be tested on a development host without ESP-IDF:
+
+```bash
+cc -std=c11 -Wall -Wextra -Werror -I main \
+  tests/test_display_schedule.c main/display_schedule.c \
+  -o /tmp/bap_display_schedule_tests
+/tmp/bap_display_schedule_tests
+```
 
 ### Custom Font System
 Multiple custom fonts included:
