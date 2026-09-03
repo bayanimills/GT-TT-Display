@@ -79,7 +79,7 @@ jobs:
             --clobber
 
           # Update release body
-          gh release edit "$VERSION" --notes "## BAP-GT-TOUCH Firmware ${VERSION}
+          gh release edit "$VERSION" --notes "## GT-TT-Display Firmware ${VERSION}
 
           ### Installation Files:
 

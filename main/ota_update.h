@@ -1,5 +1,5 @@
 /**
- * OTA Update Module for BAP-GT-TOUCH
+ * OTA Update Module for GT-TT-Display
  *
  * Provides over-the-air firmware updates from GitHub releases
  *

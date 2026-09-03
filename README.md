@@ -81,7 +81,7 @@ Protocol:     Custom BAP protocol for Bitaxe communication
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/bitaxeorg/BAP-GT-TOUCH.git
+   git clone https://github.com/bayanimills/GT-TT-Display.git
    cd 4.3LCD-ST7262-GT911
    ```
 

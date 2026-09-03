@@ -1,5 +1,5 @@
 /**
- * OTA Update Module for BAP-GT-TOUCH
+ * OTA Update Module for GT-TT-Display
  */
 
 #include "ota_update.h"
@@ -24,10 +24,10 @@ static const char *TAG = "OTA";
 #define OTA_STACK_SIZE 10240
 #define OTA_TASK_PRIORITY 1
 #define VERSION_CHECK_STACK_SIZE 8192
-#define GITHUB_API_URL "https://api.github.com/repos/bayanimills/BAP-GT-TOUCH/releases/latest"
-#define FIRMWARE_DOWNLOAD_URL "https://github.com/bayanimills/BAP-GT-TOUCH/releases/latest/download/esp-display-ota.bin"
+#define GITHUB_API_URL "https://api.github.com/repos/bayanimills/GT-TT-Display/releases/latest"
+#define FIRMWARE_DOWNLOAD_URL "https://github.com/bayanimills/GT-TT-Display/releases/latest/download/esp-display-ota.bin"
 
-static const char *ALLOWED_URL_PREFIX = "https://github.com/bayanimills/BAP-GT-TOUCH";
+static const char *ALLOWED_URL_PREFIX = "https://github.com/bayanimills/GT-TT-Display";
 
 static SemaphoreHandle_t ota_mutex = NULL;
 static ota_info_t ota_current_info = {0};
@@ -153,7 +153,7 @@ static void version_check_task(void *param)
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 15000,
         .buffer_size = 2048,
-        .user_agent = "BAP-GT-TOUCH-OTA",
+        .user_agent = "GT-TT-Display-OTA",
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
