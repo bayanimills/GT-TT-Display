@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include "esp_log.h"
 #include "chain.h"
+#include "blockfound.h"
 #include "bap_parser.h"
 #include "bap_protocol.h"
 #include "home.h"
@@ -213,6 +214,9 @@ esp_err_t bap_handle_best_difficulty_response(const char *value) {
     
     if (lvgl_port_lock(100)) {
         home_update_best_difficulty(value);
+        /* The only telemetry that can reveal a solved block: a share at or
+         * above the network target is one, by definition. */
+        blockfound_check();
         lvgl_port_unlock();
         return ESP_OK;
     } else {

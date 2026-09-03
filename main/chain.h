@@ -106,6 +106,12 @@ typedef struct {
 void chain_set_watch_address(const char *addr);
 const chain_address_t *chain_address(void);
 
+/* Re-read the watched address on the next task wake, skipping the rest of
+ * the cycle. The address is otherwise fetched last of seven requests on a
+ * five minute timer, so a screen that opens just after a cycle would show
+ * a figure up to five minutes old, or nothing at all on first boot. */
+void chain_refresh_address_now(void);
+
 /* Read NVS and start the refresh task. Safe to call once, from app_main. */
 void chain_init(void);
 

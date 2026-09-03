@@ -94,6 +94,8 @@ G <what> <value>    glass skin: layout 0|1, widgets <hexmask>, wall <index>,
                     5 also opens style), scroll <px>
 N <screen>          home night block clock price mempool wifi settings odds
 D off | D mode <n>  display off (as the corner control); button mode 0..3
+F [height]          force the block found screen
+M <frames>          time full repaints of the active screen
 R                   force repaint
 Q                   quit
 ```

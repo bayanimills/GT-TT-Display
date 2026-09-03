@@ -247,6 +247,9 @@ void payout_screen_create(void)
     payout_build_stat(parent, 0, "UNCONFIRMED", row_x, row_y, card_w, card_h, glass);
     payout_build_stat(parent, 1, "TRANSACTIONS", row_x + card_w + gap, row_y, card_w, card_h, glass);
 
+    /* Ask for a fresh balance as the screen opens rather than showing what
+     * the last five minute cycle happened to leave behind. */
+    chain_refresh_address_now();
     payout_timer = lv_timer_create(payout_timer_cb, 3000, NULL);
     payout_refresh();
 

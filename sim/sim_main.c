@@ -48,6 +48,7 @@
 #include "settings.h"
 #include "odds.h"
 #include "payout.h"
+#include "blockfound.h"
 #include "chain.h"
 #include "loading.h"
 #include "bap_parser.h"
@@ -303,6 +304,15 @@ static void handle_command(char *line)
         s_dirty = true;
         break;
     }
+    case 'F':
+        /* Force the block found screen. Solving a real block to see it is
+         * not a practical test plan. */
+        lvgl_port_lock(-1);
+        blockfound_trigger(arg[0] ? arg : NULL, NULL);
+        lvgl_port_unlock();
+        s_dirty = true;
+        break;
+
     case 'M': {
         /* Time full repaints of the active screen.
          *

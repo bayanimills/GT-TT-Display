@@ -72,6 +72,7 @@ static int          s_http_len = 0;
 static TaskHandle_t s_task = NULL;
 static chain_address_t s_addr;
 static bool s_netif_ready = false;
+static volatile bool s_addr_only = false;
 
 /* ---- preferences ---- */
 
@@ -188,6 +189,19 @@ void chain_set_fx_to_usd(double ratio)
 const chain_data_t *chain_data(void) { return &s_data; }
 
 const chain_address_t *chain_address(void) { return &s_addr; }
+
+void chain_refresh_address_now(void)
+{
+    if (!s_addr.watching)
+    {
+        return;
+    }
+    s_addr_only = true;
+    if (s_task)
+    {
+        xTaskNotifyGive(s_task);
+    }
+}
 
 /* Cheap plausibility check. The point is to reject a pool user that is a
  * plain username rather than to validate bech32 or base58: a wrong-looking
@@ -783,6 +797,16 @@ static void chain_task(void *arg)
         if (!chain_net_ready())
         {
             vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+
+        /* An address-only pass, so opening the payout screen does not wait
+         * behind six other requests and a five minute timer. */
+        if (s_addr_only)
+        {
+            s_addr_only = false;
+            chain_fetch_address();
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
             continue;
         }
 
