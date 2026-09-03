@@ -20,6 +20,8 @@ A sophisticated touchscreen display addon for Bitaxe miners, featuring a 4.3-inc
 - **Smooth UI**: LVGL-powered interface with custom fonts and graphics
 - **Power Efficient**: Optimized for continuous operation with mining hardware
 
+- **Screen Simulator**: run the real UI on a workstation, no hardware required (see below)
+
 ## 🔧 Hardware Specifications
 
 ### Display Module
@@ -136,6 +138,38 @@ Touch-optimized network configuration:
 Night friendly mode with reduced brightness and eye-friendly colors
 
 - **Hashrate**: Live hashrate over the past 5 minutes.
+
+## 🖥️ Screen Simulator (no hardware needed)
+
+`sim/` compiles the **real** screen code from `main/` against host LVGL and streams the
+800x480 framebuffer to a browser. Clicks go back in as GT911 touch events. Layout,
+palette and interaction work needs no board.
+
+It builds with **gcc, make and python3 only**: no ESP-IDF, no SDL, no emscripten.
+
+```bash
+cd sim
+make -j8
+python3 server.py            # then open http://localhost:8010
+```
+
+Headless screenshots, useful for reviewing a palette across screens or attaching
+before/after images to a PR:
+
+```bash
+python3 shot.py shots                      # every theme preset, home screen
+python3 shot.py shots --screen settings    # a specific screen
+```
+
+Only the genuinely board-specific pieces are replaced: the ST7262 panel and GT911
+driver become an in-memory framebuffer, the ESP LVGL port becomes a plain tick loop,
+and BAP sentences are injected straight into the real parser instead of arriving over
+UART. Every screen, font and asset is compiled from the repo unchanged.
+
+`server.py --live <bitaxe-ip>` polls a real miner's HTTP API and replays it as BAP
+traffic, so the simulated panel shows live numbers without anything being flashed.
+
+See [`sim/README.md`](sim/README.md) for the command protocol and caveats.
 
 ## 🔌 BAP Protocol Integration
 
