@@ -73,7 +73,11 @@ static const scene_t k_scenes[] = {
     },
     {
         "Graphite", 0x0B0B0E, 0x1C1D23,
-        { { 0.50f, 0.69f, 0.55f, 0xF7931A, 0.32f },
+        /* Not 0xF7931A. That is bit for bit the Bitcoin Orange preset accent,
+         * and this glow sits at x=0.50 y=0.69, right where the drawer and nav
+         * land: an accent drawn on it had a contrast ratio of about 1.0 and
+         * simply vanished. A few degrees off is enough to separate them. */
+        { { 0.50f, 0.69f, 0.55f, 0xE87D12, 0.32f },
           { 0.10f, 0.06f, 0.50f, 0x4A5060, 0.30f } }, 2,
         { { 0.72f, 0.30f, 0.32f, 0x2A2C34, 0x15161A, 0.85f },
           { 0.72f, 0.30f, 0.28f, 0x121317, 0x1E2026, 0.90f } }, 2,

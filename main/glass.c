@@ -215,6 +215,18 @@ static void order_reset(void)
     for (int i = 0; i < GLASS_WIDGET_COUNT; i++) s_order[i] = (uint8_t) i;
 }
 
+/* The saved part of an order: every id in range, no repeats. Says nothing
+ * about ids that were not in the build that wrote it. */
+static bool order_prefix_valid(const uint8_t *o, size_t n)
+{
+    uint32_t seen = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (o[i] >= GLASS_WIDGET_COUNT || (seen & (1u << o[i]))) return false;
+        seen |= 1u << o[i];
+    }
+    return true;
+}
+
 static bool order_valid(const uint8_t *o)
 {
     uint32_t seen = 0;
@@ -237,10 +249,26 @@ static void prefs_load(void)
     if (nvs_get_i32(h, GLASS_NVS_WIDGETS, &v) == ESP_OK) s_mask = (uint32_t) v;
     if (nvs_get_i32(h, GLASS_NVS_LAYOUT, &v) == ESP_OK && v >= 0 && v < GLASS_LAYOUT_COUNT) s_layout = (glass_layout_t) v;
     if (nvs_get_i32(h, GLASS_NVS_WALL, &v) == ESP_OK && v >= 0 && v < wallpaper_count()) s_wall = (int) v;
+    /* A saved order from an older build is shorter than this array, because
+     * adding a widget grows GLASS_WIDGET_COUNT. Requiring an exact length
+     * threw the whole arrangement away every time one was added, which has
+     * already happened twice. Keep what was saved, in the order it was saved,
+     * and append whatever is new on the end. */
     uint8_t order[GLASS_WIDGET_COUNT];
     size_t len = sizeof(order);
-    if (nvs_get_blob(h, GLASS_NVS_ORDER, order, &len) == ESP_OK && len == sizeof(order) && order_valid(order)) {
-        memcpy(s_order, order, sizeof(s_order));
+    if (nvs_get_blob(h, GLASS_NVS_ORDER, order, &len) == ESP_OK && len > 0 &&
+        len <= sizeof(order) && order_prefix_valid(order, len)) {
+        uint32_t seen = 0;
+        size_t n = 0;
+        for (; n < len; n++) {
+            s_order[n] = order[n];
+            seen |= 1u << order[n];
+        }
+        for (uint8_t id = 0; id < GLASS_WIDGET_COUNT && n < GLASS_WIDGET_COUNT; id++) {
+            if (!(seen & (1u << id))) {
+                s_order[n++] = id;
+            }
+        }
     }
     nvs_close(h);
 }
@@ -1054,15 +1082,21 @@ static void card_refresh(card_t *c)
         set_if_changed(c->value, nz(st->fan, "--"));
         break;
     case GLASS_WIDGET_POOL:
+        /* The pool user is not shown. On a solo pool it is the payout
+         * address, which is a long string that tells the owner nothing they
+         * do not know and puts their address on a screen that faces a room.
+         * The port is the useful half. */
         set_if_changed(c->value, nz(st->pool->url, "--"));
-        snprintf(buf, sizeof(buf), "%s  %s", nz(st->pool->port, ""), nz(st->pool->worker_name, ""));
+        snprintf(buf, sizeof(buf), "port %s", nz(st->pool->port, "--"));
         set_if_changed(c->sub, buf);
         break;
     case GLASS_WIDGET_BLOCK:
         set_if_changed(c->value, block_get_height_text());
         break;
     case GLASS_WIDGET_PRICE:
-        snprintf(buf, sizeof(buf), "$%s", price_get_text());
+        /* Follow the currency chosen in settings rather than assuming USD. */
+        snprintf(buf, sizeof(buf), "%s%s", chain_ccy_prefix(chain_get_ccy()),
+                 price_get_text());
         set_if_changed(c->value, buf);
         set_if_changed(c->sub, price_get_status());
         break;
@@ -1130,7 +1164,11 @@ static const char *widget_caption(glass_widget_t id)
     case GLASS_WIDGET_FAN:         return "FAN";
     case GLASS_WIDGET_POOL:        return "POOL";
     case GLASS_WIDGET_BLOCK:       return "BLOCK HEIGHT";
-    case GLASS_WIDGET_PRICE:       return "BTC / USD";
+    case GLASS_WIDGET_PRICE: {
+        static char cap[24];
+        snprintf(cap, sizeof(cap), "BTC / %s", chain_ccy_code(chain_get_ccy()));
+        return cap;
+    }
     case GLASS_WIDGET_MEMPOOL:     return "MEMPOOL  LATEST BLOCK";
     case GLASS_WIDGET_CLOCK:       return "TIME";
     case GLASS_WIDGET_HALVING:     return "HALVING  BLOCKS LEFT";

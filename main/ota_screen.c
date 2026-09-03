@@ -45,12 +45,23 @@ void ota_screen_show(void)
     lv_obj_set_style_text_font(progress_label, &lv_font_montserrat_48, 0);
     lv_obj_align(progress_label, LV_ALIGN_CENTER, 0, 40);
 
-    // Warning message
+    /* The backlight is switched off for the whole download and flash, because
+     * writing flash stalls the PSRAM the panel scans out of and the picture
+     * tears. A dark screen for several minutes looks exactly like a device
+     * that has died, and the obvious response to that is to pull the power,
+     * which is the one thing that would actually break it. So say so, in the
+     * seconds before it goes dark. */
     lv_obj_t *warning = lv_label_create(ota_screen);
-    lv_label_set_text(warning, "Do not power off device");
-    lv_obj_set_style_text_color(warning, lv_color_hex(0xFF6B6B), 0);
-    lv_obj_set_style_text_font(warning, &lv_font_montserrat_18, 0);
-    lv_obj_align(warning, LV_ALIGN_BOTTOM_MID, 0, -40);
+    lv_label_set_text(warning, "The screen goes dark while this installs.");
+    lv_obj_set_style_text_color(warning, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(warning, &lv_font_montserrat_20, 0);
+    lv_obj_align(warning, LV_ALIGN_BOTTOM_MID, 0, -66);
+
+    lv_obj_t *warning2 = lv_label_create(ota_screen);
+    lv_label_set_text(warning2, "This takes a few minutes. Do not unplug it.");
+    lv_obj_set_style_text_color(warning2, lv_color_hex(0xFF6B6B), 0);
+    lv_obj_set_style_text_font(warning2, &lv_font_montserrat_20, 0);
+    lv_obj_align(warning2, LV_ALIGN_BOTTOM_MID, 0, -36);
 
     // Load the screen
     lv_scr_load(ota_screen);

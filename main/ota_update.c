@@ -270,13 +270,22 @@ static void ota_task(void *param)
         lvgl_port_unlock();
     }
 
-    // Small delay to ensure screen is rendered, then suspend LVGL task
-    vTaskDelay(pdMS_TO_TICKS(100));
+    /* Long enough to read the warning, not just to render it. 100 ms was
+     * enough for LVGL to draw the screen and far too little for a person to
+     * see it, so the display appeared to die the instant the update was
+     * confirmed. */
+    vTaskDelay(pdMS_TO_TICKS(4500));
     lvgl_port_task_suspend();
 
-    // Turn off backlight to prevent flickering during flash writes
-    ESP_LOGI(TAG, "Turning off display backlight during flash writes");
-    lcd_backlight_disable();
+    /* The backlight stays on. It used to be cut here so that flash writes,
+     * which stall the PSRAM the panel scans out of, could not tear the
+     * picture. The cost was a display that went black the instant the update
+     * was confirmed and stayed black for minutes, which reads as a dead
+     * device and invites exactly the yank that would ruin it. A frozen or
+     * briefly torn progress screen says working; a black one says broken.
+     *
+     * LVGL stays suspended between writes, so the panel just rescans the same
+     * framebuffer; it is woken only to move the bar. */
 
     ota_set_status(OTA_STATUS_DOWNLOADING, 0, NULL);
 
@@ -317,6 +326,8 @@ static void ota_task(void *param)
         lvgl_port_unlock();
     }
 
+    int last_shown_progress = -1;
+
     ESP_LOGI(TAG, "Starting flash write (BAP client suspended)");
 
     while (1) {
@@ -333,6 +344,20 @@ static void ota_task(void *param)
             // Log progress periodically
             if ((read_len & 0xFFFF) < 4096) {
                 ESP_LOGI(TAG, "Flash progress: %d%% (%d/%d bytes)", progress, read_len, image_size);
+            }
+
+            /* Wake the UI only when the figure has actually moved. Repainting
+             * is safe between writes but not free, and doing it every pass
+             * would slow the install for no extra information. */
+            if (progress != last_shown_progress) {
+                last_shown_progress = progress;
+                lvgl_port_task_resume();
+                if (lvgl_port_lock(100)) {
+                    ota_screen_update_progress(progress);
+                    lvgl_port_unlock();
+                }
+                vTaskDelay(pdMS_TO_TICKS(30));
+                lvgl_port_task_suspend();
             }
 
             // Small delay to allow other tasks to run
@@ -368,8 +393,8 @@ static void ota_task(void *param)
     ota_set_status(OTA_STATUS_SUCCESS, 100, NULL);
     ESP_LOGI(TAG, "OTA update successful! Rebooting in 3 seconds...");
 
-    // Turn backlight back on
-    ESP_LOGI(TAG, "Turning on display backlight");
+    /* On throughout now, but make sure: a schedule or a corner tap could have
+     * turned it off while this ran. */
     lcd_backlight_enable();
 
     // Resume LVGL task to show completion message
@@ -390,8 +415,8 @@ cleanup:
         esp_https_ota_abort(ota_handle);
     }
 
-    // Turn backlight back on
-    ESP_LOGI(TAG, "Turning on display backlight");
+    /* On throughout now, but make sure: a schedule or a corner tap could have
+     * turned it off while this ran. */
     lcd_backlight_enable();
 
     // Resume LVGL task first
