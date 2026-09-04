@@ -1802,11 +1802,14 @@ static void layout_seg_cb(lv_event_t *e)
     lv_async_call(reopen_widgets_sheet_async, NULL);
 }
 
-static lv_obj_t *small_round_button(lv_obj_t *parent, const char *symbol, int x, int y, lv_event_cb_t cb, void *ud, bool enabled)
+/* 46 px, right aligned at a given offset. The 30 px version it replaces was
+ * below anything a finger reliably hits. */
+static lv_obj_t *big_round_button(lv_obj_t *parent, const char *symbol, int dx,
+                                  lv_event_cb_t cb, void *ud, bool enabled)
 {
     lv_obj_t *b = lv_obj_create(parent);
-    lv_obj_set_size(b, 30, 30);
-    lv_obj_set_pos(b, x, y);
+    lv_obj_set_size(b, 46, 46);
+    lv_obj_align(b, LV_ALIGN_RIGHT_MID, dx, 0);
     lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(b, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(b, enabled ? LV_OPA_20 : LV_OPA_10, 0);
@@ -1815,14 +1818,23 @@ static lv_obj_t *small_round_button(lv_obj_t *parent, const char *symbol, int x,
     lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
     if (enabled) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, ud);
     else         lv_obj_clear_flag(b, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t *l = glass_label(b, symbol, &lv_font_montserrat_12, enabled ? LV_OPA_90 : LV_OPA_40);
+    lv_obj_t *l = glass_label(b, symbol, &lv_font_montserrat_18, enabled ? LV_OPA_90 : LV_OPA_40);
     lv_obj_center(l);
     return b;
 }
 
+static void widget_row_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = (lv_obj_t *) lv_event_get_user_data(e);
+    if (!sw) return;
+    if (lv_obj_has_state(sw, LV_STATE_CHECKED)) lv_obj_clear_state(sw, LV_STATE_CHECKED);
+    else                                        lv_obj_add_state(sw, LV_STATE_CHECKED);
+    lv_event_send(sw, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
 static void build_widgets_sheet(void)
 {
-    lv_obj_t *p = sheet_frame(640, 420, "Widgets");
+    lv_obj_t *p = sheet_frame(720, 448, "Widgets");
 
     /* Layout lives with the widgets it arranges: a two-way segmented control. */
     for (int i = 0; i < 2; i++) {
@@ -1842,14 +1854,16 @@ static void build_widgets_sheet(void)
         lv_obj_center(l);
     }
 
-    /* Two columns in display order: name, move up/down, toggle.
+    /* One column of full width rows, because two columns of 30 px buttons
+     * with 12 px glyphs was unusable with a finger. Every row is 56 px tall,
+     * the reorder buttons are 46 px, and the whole row toggles: only the two
+     * arrows take a tap for themselves.
      *
-     * The rows live in their own scroller rather than being placed straight on
-     * the sheet, which was a fixed two-by-six and so silently capped the widget
-     * list at twelve: a thirteenth landed in a third column past the edge. */
+     * It scrolls, which two columns avoided, but a list you have to scroll
+     * and can hit beats one that fits and you cannot. */
     lv_obj_t *list = lv_obj_create(p);
-    lv_obj_set_size(list, 600, 336);
-    lv_obj_set_pos(list, 20, 64);
+    lv_obj_set_size(list, 672, 356);
+    lv_obj_set_pos(list, 24, 72);
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(list, 0, 0);
     lv_obj_set_style_pad_all(list, 0, 0);
@@ -1857,26 +1871,33 @@ static void build_widgets_sheet(void)
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_style_bg_color(list, lv_color_white(), LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(list, LV_OPA_40, LV_PART_SCROLLBAR);
-    lv_obj_set_style_width(list, 4, LV_PART_SCROLLBAR);
+    lv_obj_set_style_width(list, 5, LV_PART_SCROLLBAR);
 
-    const int per_col = (GLASS_WIDGET_COUNT + 1) / 2;
+    const int ROW_H = 56;
+    const int ROW_W = 656;
 
     for (int pos = 0; pos < GLASS_WIDGET_COUNT; pos++) {
         int id = s_order[pos];
-        int col = pos / per_col, row = pos % per_col;
-        int x = 8 + col * 306, y = row * 54;
+        int y = pos * ROW_H;
 
-        lv_obj_t *name = glass_label(list, k_widget_names[id], &lv_font_montserrat_16, LV_OPA_COVER);
-        lv_obj_set_width(name, 140);
+        lv_obj_t *row = lv_obj_create(list);
+        lv_obj_set_size(row, ROW_W, ROW_H - 4);
+        lv_obj_set_pos(row, 0, y);
+        lv_obj_set_style_bg_color(row, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_10, 0);
+        lv_obj_set_style_radius(row, 14, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *name = glass_label(row, k_widget_names[id], &lv_font_montserrat_18, LV_OPA_COVER);
+        lv_obj_set_width(name, 380);
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-        lv_obj_set_pos(name, x, y + 7);
+        lv_obj_align(name, LV_ALIGN_LEFT_MID, 18, 0);
 
-        small_round_button(list, LV_SYMBOL_UP,   x + 146, y, widget_move_cb, (void *) (intptr_t) ((pos << 1) | 0), pos > 0);
-        small_round_button(list, LV_SYMBOL_DOWN, x + 180, y, widget_move_cb, (void *) (intptr_t) ((pos << 1) | 1), pos < GLASS_WIDGET_COUNT - 1);
-
-        lv_obj_t *sw = lv_switch_create(list);
-        lv_obj_set_size(sw, 54, 30);
-        lv_obj_set_pos(sw, x + 222, y);
+        lv_obj_t *sw = lv_switch_create(row);
+        lv_obj_set_size(sw, 58, 32);
+        lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -16, 0);
         lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(sw, LV_OPA_30, LV_PART_MAIN);
         lv_obj_set_style_bg_color(sw, COLOR_ACCENT, LV_PART_INDICATOR | LV_STATE_CHECKED);
@@ -1888,6 +1909,17 @@ static void build_widgets_sheet(void)
         lv_obj_set_style_outline_width(sw, 0, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
         if (s_mask & (1u << id)) lv_obj_add_state(sw, LV_STATE_CHECKED);
         lv_obj_add_event_cb(sw, widget_switch_cb, LV_EVENT_VALUE_CHANGED, (void *) (intptr_t) id);
+
+        /* The arrows sit inboard of the switch and claim their own taps. */
+        big_round_button(row, LV_SYMBOL_UP,   -196, widget_move_cb,
+                         (void *) (intptr_t) ((pos << 1) | 0), pos > 0);
+        big_round_button(row, LV_SYMBOL_DOWN, -140, widget_move_cb,
+                         (void *) (intptr_t) ((pos << 1) | 1), pos < GLASS_WIDGET_COUNT - 1);
+
+        /* Anywhere else on the row flips the switch, so the target is the row
+         * rather than a 58 px control at the far end of it. */
+        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(row, widget_row_cb, LV_EVENT_CLICKED, sw);
     }
 }
 
