@@ -254,16 +254,6 @@ static bool order_prefix_valid(const uint8_t *o, size_t n)
     return true;
 }
 
-static bool order_valid(const uint8_t *o)
-{
-    uint32_t seen = 0;
-    for (int i = 0; i < GLASS_WIDGET_COUNT; i++) {
-        if (o[i] >= GLASS_WIDGET_COUNT || (seen & (1u << o[i]))) return false;
-        seen |= 1u << o[i];
-    }
-    return true;
-}
-
 static void prefs_load(void)
 {
     if (s_prefs_loaded) return;
