@@ -10,6 +10,10 @@
 #include "clock.h"
 #include "price.h"
 #include "mempool.h"
+#include "feed.h"
+#include "poolping.h"
+#include "wallpaper.h"
+#include "lvgl__lvgl/src/extra/libs/qrcode/lv_qrcode.h"
 #include "stdio.h"
 #include "string.h"
 #include "custom_fonts.h"
@@ -52,6 +56,12 @@ static lv_obj_t *display_corner_dropdown = NULL;
 static lv_obj_t *display_corner_hint = NULL;
 static lv_obj_t *theme_dropdown = NULL;
 static lv_obj_t *skin_dropdown = NULL;
+static lv_obj_t *glass_settings_body = NULL;
+static lv_obj_t *glass_settings_pane = NULL;
+static lv_obj_t *display_dim_slider = NULL;
+static lv_obj_t *display_dim_value_label = NULL;
+static lv_timer_t *glass_pool_timer = NULL;
+static lv_obj_t *glass_pool_values[8] = { NULL };
 static lv_obj_t *sys_overlay = NULL;
 static int diag_counter = 0;
 
@@ -129,6 +139,17 @@ static void settings_restore_overlay_close(lv_event_t *e);
 static void settings_sync_fan_disclosure(void);
 static void settings_layout_schedule_controls(void);
 static void settings_restore_disclosure_clicked(lv_event_t *e);
+
+typedef enum {
+    GLASS_SETTINGS_HUB = 0,
+    GLASS_SETTINGS_STYLE,
+    GLASS_SETTINGS_POOL,
+    GLASS_SETTINGS_DISPLAY,
+    GLASS_SETTINGS_SYSTEM,
+} glass_settings_page_t;
+
+static glass_settings_page_t glass_settings_page = GLASS_SETTINGS_HUB;
+static void glass_settings_render(void);
 
 static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
 {
@@ -533,11 +554,12 @@ static void ota_update_timer_cb(lv_timer_t *timer)
     char status_text[128];
 
     lv_obj_t *btn_label = lv_obj_get_child(ota_update_btn, 0);
+    const bool compact_ota = glass_active() && glass_settings_page == GLASS_SETTINGS_SYSTEM;
 
     switch (info.status) {
         case OTA_STATUS_IDLE:
             lv_label_set_text(ota_status_label, "Ready for update");
-            if (btn_label) lv_label_set_text(btn_label, "CHECK FOR UPDATES");
+            if (btn_label) lv_label_set_text(btn_label, compact_ota ? "UPDATE" : "CHECK FOR UPDATES");
             lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
             break;
@@ -556,14 +578,14 @@ static void ota_update_timer_cb(lv_timer_t *timer)
                     info.current_version, info.latest_version);
                 lv_label_set_text(ota_version_label, status_text);
             }
-            if (btn_label) lv_label_set_text(btn_label, "INSTALL UPDATE");
+            if (btn_label) lv_label_set_text(btn_label, compact_ota ? "INSTALL" : "INSTALL UPDATE");
             lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
             break;
 
         case OTA_STATUS_NO_UPDATE:
             lv_label_set_text(ota_status_label, "Already up to date");
-            if (btn_label) lv_label_set_text(btn_label, "CHECK FOR UPDATES");
+            if (btn_label) lv_label_set_text(btn_label, compact_ota ? "UPDATE" : "CHECK FOR UPDATES");
             lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 100, LV_ANIM_OFF);
             break;
@@ -588,7 +610,7 @@ static void ota_update_timer_cb(lv_timer_t *timer)
         case OTA_STATUS_ERROR:
             lv_label_set_text_fmt(ota_status_label, "Error: %s", 
                 info.error_msg[0] ? info.error_msg : "Unknown error");
-            if (btn_label) lv_label_set_text(btn_label, "CHECK FOR UPDATES");
+            if (btn_label) lv_label_set_text(btn_label, compact_ota ? "UPDATE" : "CHECK FOR UPDATES");
             lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
             break;
@@ -600,7 +622,7 @@ static void ota_update_timer_cb(lv_timer_t *timer)
             case OTA_RESTORE_IDLE:
                 lv_label_set_text(ota_restore_status_label,
                                   "Official release: check before restoring");
-                if (restore_label) lv_label_set_text(restore_label, "CHECK OFFICIAL RELEASE");
+                if (restore_label) lv_label_set_text(restore_label, compact_ota ? "CHECK OFFICIAL" : "CHECK OFFICIAL RELEASE");
                 lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
                 break;
             case OTA_RESTORE_CHECKING:
@@ -612,13 +634,13 @@ static void ota_update_timer_cb(lv_timer_t *timer)
             case OTA_RESTORE_READY:
                 lv_label_set_text_fmt(ota_restore_status_label,
                                       "Latest official release: %s", info.original_version);
-                if (restore_label) lv_label_set_text(restore_label, "ATTEMPT OFFICIAL RESTORE");
+                if (restore_label) lv_label_set_text(restore_label, compact_ota ? "RESTORE" : "ATTEMPT OFFICIAL RESTORE");
                 lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
                 break;
             case OTA_RESTORE_ERROR:
                 lv_label_set_text_fmt(ota_restore_status_label, "Official check failed: %s",
                                       info.restore_error_msg[0] ? info.restore_error_msg : "Unknown error");
-                if (restore_label) lv_label_set_text(restore_label, "TRY OFFICIAL CHECK AGAIN");
+                if (restore_label) lv_label_set_text(restore_label, compact_ota ? "TRY AGAIN" : "TRY OFFICIAL CHECK AGAIN");
                 lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
                 break;
         }
@@ -962,6 +984,589 @@ static void settings_layout_schedule_controls(void)
     }
 }
 
+/* ---------------- Glass: fixed, full-screen Settings routes ----------------
+ *
+ * Glass deliberately does not reuse the long Classic preferences list.  A
+ * bottom tap replaces the current screen with this hub, and every destination
+ * is either a complete screen or a complete, non-scrolling settings page. */
+
+static lv_obj_t *glass_settings_card(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_set_size(card, w, h);
+    lv_obj_set_pos(card, x, y);
+    lv_obj_set_style_bg_color(card, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_10, 0);
+    lv_obj_set_style_border_color(card, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(card, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_radius(card, 18, 0);
+    lv_obj_set_style_pad_all(card, 0, 0);
+    lv_obj_set_style_shadow_width(card, 0, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    return card;
+}
+
+static lv_obj_t *glass_settings_action(lv_obj_t *parent, const char *title,
+                                        const char *subtitle,
+                                        int x, int y, int w, int h,
+                                        lv_event_cb_t cb, void *user)
+{
+    lv_obj_t *card = glass_settings_card(parent, x, y, w, h);
+    lv_obj_set_style_bg_color(card, COLOR_ACCENT, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(card, LV_OPA_30, LV_STATE_PRESSED);
+    if (cb) lv_obj_add_event_cb(card, cb, LV_EVENT_CLICKED, user);
+
+    lv_obj_t *name = lv_label_create(card);
+    lv_label_set_text(name, title);
+    lv_obj_set_style_text_color(name, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(name, &lv_font_montserrat_18, 0);
+    lv_obj_align(name, LV_ALIGN_CENTER, 0, subtitle && subtitle[0] ? -12 : 0);
+    lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    if (subtitle && subtitle[0]) {
+        lv_obj_t *hint = lv_label_create(card);
+        lv_label_set_text(hint, subtitle);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(hint, w - 18);
+        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(hint, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+        lv_obj_align(hint, LV_ALIGN_CENTER, 0, 17);
+        lv_obj_clear_flag(hint, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
+    return card;
+}
+
+static void glass_settings_reset_refs(void)
+{
+    performance_low_btn = performance_medium_btn = performance_high_btn = NULL;
+    auto_fan_checkbox = fan_section = fan_manual_cont = NULL;
+    fan_slider = fan_value_label = fan_save_btn = NULL;
+    brightness_slider = brightness_value_label = NULL;
+    timezone_dropdown = data_source_dropdown = currency_dropdown = NULL;
+    display_schedule_checkbox = display_schedule_status = NULL;
+    display_section = schedule_details_cont = NULL;
+    display_off_dropdown = display_on_dropdown = NULL;
+    display_corner_label = display_corner_dropdown = display_corner_hint = NULL;
+    display_dim_slider = display_dim_value_label = NULL;
+    theme_dropdown = skin_dropdown = NULL;
+    ota_update_btn = ota_status_label = ota_progress_bar = ota_version_label = NULL;
+    ota_restore_btn = ota_restore_status_label = ota_section = NULL;
+    restore_details_cont = restore_disclosure_btn = NULL;
+    memset(glass_pool_values, 0, sizeof(glass_pool_values));
+}
+
+static void glass_settings_stop_page_tasks(void)
+{
+    if (display_schedule_timer) {
+        lv_timer_del(display_schedule_timer);
+        display_schedule_timer = NULL;
+    }
+    if (glass_pool_timer) {
+        lv_timer_del(glass_pool_timer);
+        glass_pool_timer = NULL;
+    }
+    if (ota_timer) {
+        lv_timer_del(ota_timer);
+        ota_timer = NULL;
+    }
+}
+
+static void glass_settings_render_async(void *page)
+{
+    glass_settings_page = (glass_settings_page_t)(intptr_t)page;
+    glass_settings_render();
+}
+
+static void glass_settings_page_clicked(lv_event_t *e)
+{
+    lv_async_call(glass_settings_render_async, lv_event_get_user_data(e));
+}
+
+static void glass_settings_screen_clicked(lv_event_t *e)
+{
+    glass_settings_page = GLASS_SETTINGS_HUB;
+    glass_goto((glass_screen_t)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void glass_settings_back_clicked(lv_event_t *e)
+{
+    (void)e;
+    lv_async_call(glass_settings_render_async, (void *)(intptr_t)GLASS_SETTINGS_HUB);
+}
+
+static void glass_settings_header(const char *title)
+{
+    lv_obj_t *back = create_settings_button(glass_settings_body, LV_SYMBOL_LEFT "  BACK",
+                                             glass_settings_back_clicked, false);
+    lv_obj_set_size(back, 118, 46);
+    lv_obj_set_pos(back, 16, 10);
+    lv_obj_add_flag(back, LV_OBJ_FLAG_FLOATING);
+
+    lv_obj_t *label = lv_label_create(glass_settings_body);
+    lv_label_set_text(label, title);
+    lv_obj_set_style_text_color(label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
+    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 18);
+    lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING);
+}
+
+static void glass_settings_build_hub(void)
+{
+    lv_obj_t *title = lv_label_create(glass_settings_body);
+    lv_label_set_text(title, "SETTINGS");
+    lv_obj_set_style_text_color(title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
+
+    typedef struct {
+        const char *title;
+        const char *hint;
+        bool screen;
+        intptr_t target;
+    } tile_t;
+    static const tile_t tile[] = {
+        { "Home",    "Widgets",        true,  GLASS_SCREEN_HOME },
+        { "Blocks",  "Chain status",   true,  GLASS_SCREEN_BLOCK },
+        { "Mempool", "Fees + queue",   true,  GLASS_SCREEN_MEMPOOL },
+        { "Clock",   "Time display",   true,  GLASS_SCREEN_CLOCK },
+        { "Price",   "Exchange rate",  true,  GLASS_SCREEN_PRICE },
+        { "Odds",    "Solo mining",    true,  GLASS_SCREEN_ODDS },
+        { "Feed",    "Recent updates", true,  GLASS_SCREEN_FEED },
+        { "Wi-Fi",   "Network setup",  true,  GLASS_SCREEN_WIFI },
+        { "Style",   "Orange + Glass", false, GLASS_SETTINGS_STYLE },
+        { "Pool",    "AxeOS + latency",false, GLASS_SETTINGS_POOL },
+        { "Display", "Brightness",     false, GLASS_SETTINGS_DISPLAY },
+        { "System",  "Miner + firmware",false,GLASS_SETTINGS_SYSTEM },
+    };
+
+    const int x0 = 15, y0 = 48, w = 173, h = 96, gx = 10, gy = 10;
+    for (int i = 0; i < 12; i++) {
+        glass_settings_action(glass_settings_body, tile[i].title, tile[i].hint,
+                              x0 + (i % 4) * (w + gx),
+                              y0 + (i / 4) * (h + gy), w, h,
+                              tile[i].screen ? glass_settings_screen_clicked
+                                             : glass_settings_page_clicked,
+                              (void *)tile[i].target);
+    }
+}
+
+static void glass_settings_orange_clicked(lv_event_t *e)
+{
+    (void)e;
+    lv_async_call(settings_apply_theme_async, (void *)(intptr_t)1);
+}
+
+static void glass_settings_wallpaper_clicked(lv_event_t *e)
+{
+    glass_set_wallpaper((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void glass_settings_build_style(void)
+{
+    glass_settings_header("STYLE");
+
+    lv_obj_t *accent = glass_settings_card(glass_settings_body, 18, 68, 716, 94);
+    lv_obj_t *accent_title = lv_label_create(accent);
+    lv_label_set_text(accent_title, "Accent");
+    lv_obj_set_style_text_color(accent_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(accent_title, &lv_font_montserrat_18, 0);
+    lv_obj_align(accent_title, LV_ALIGN_LEFT_MID, 18, 0);
+    theme_dropdown = lv_dropdown_create(accent);
+    lv_obj_set_size(theme_dropdown, 290, 54);
+    lv_obj_align(theme_dropdown, LV_ALIGN_LEFT_MID, 112, 0);
+    lv_dropdown_set_options(theme_dropdown, theme_dropdown_options());
+    lv_dropdown_set_selected(theme_dropdown, theme_get_index());
+    glass_style_dropdown(theme_dropdown);
+    lv_obj_add_event_cb(theme_dropdown, settings_theme_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_t *orange = create_settings_button(accent, "BITCOIN ORANGE",
+                                               glass_settings_orange_clicked,
+                                               theme_get_index() == 1);
+    lv_obj_set_size(orange, 250, 54);
+    lv_obj_align(orange, LV_ALIGN_RIGHT_MID, -16, 0);
+
+    lv_obj_t *walls = glass_settings_card(glass_settings_body, 18, 174, 716, 116);
+    lv_obj_t *wall_title = lv_label_create(walls);
+    lv_label_set_text(wall_title, "Wallpaper");
+    lv_obj_set_style_text_color(wall_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(wall_title, &lv_font_montserrat_18, 0);
+    lv_obj_set_pos(wall_title, 16, 10);
+    int count = wallpaper_count();
+    for (int i = 0; i < count && i < 3; i++) {
+        lv_obj_t *btn = create_settings_button(walls, wallpaper_name(i),
+                                                NULL,
+                                                glass_get_wallpaper() == i);
+        lv_obj_set_size(btn, 214, 54);
+        lv_obj_set_pos(btn, 16 + i * 230, 48);
+        lv_obj_add_event_cb(btn, glass_settings_wallpaper_clicked, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)i);
+    }
+
+    lv_obj_t *skin = glass_settings_card(glass_settings_body, 18, 302, 716, 84);
+    lv_obj_t *skin_title = lv_label_create(skin);
+    lv_label_set_text(skin_title, "Interface style");
+    lv_obj_set_style_text_color(skin_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(skin_title, &lv_font_montserrat_18, 0);
+    lv_obj_align(skin_title, LV_ALIGN_LEFT_MID, 18, 0);
+    skin_dropdown = lv_dropdown_create(skin);
+    lv_obj_set_size(skin_dropdown, 260, 54);
+    lv_obj_align(skin_dropdown, LV_ALIGN_RIGHT_MID, -16, 0);
+    lv_dropdown_set_options(skin_dropdown, "Classic\nGlass");
+    lv_dropdown_set_selected(skin_dropdown, (uint16_t)theme_get_skin());
+    glass_style_dropdown(skin_dropdown);
+    lv_obj_add_event_cb(skin_dropdown, settings_skin_changed, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+static void glass_settings_pool_refresh_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    int n = poolping_count();
+    for (int rank = 0; rank < n && rank < 8; rank++) {
+        if (!glass_pool_values[rank]) continue;
+        int idx = poolping_ranked(rank);
+        int ms = poolping_latency_ms(idx);
+        if (ms == POOLPING_PENDING) lv_label_set_text(glass_pool_values[rank], "...");
+        else if (ms == POOLPING_FAILED) lv_label_set_text(glass_pool_values[rank], "NO REPLY");
+        else lv_label_set_text_fmt(glass_pool_values[rank], "%d ms", ms);
+    }
+}
+
+static void glass_settings_build_pool(void)
+{
+    glass_settings_header("POOL");
+    const home_stats_t *stats = home_stats();
+
+    lv_obj_t *current = glass_settings_card(glass_settings_body, 18, 68, 326, 318);
+    lv_obj_t *cap = lv_label_create(current);
+    lv_label_set_text(cap, "CURRENT POOL");
+    lv_obj_set_style_text_color(cap, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(cap, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(cap, 16, 14);
+    lv_obj_t *url = lv_label_create(current);
+    lv_label_set_text(url, stats && stats->pool && stats->pool->url[0]
+                                ? stats->pool->url : "Waiting for miner");
+    lv_label_set_long_mode(url, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(url, 292);
+    lv_obj_set_style_text_color(url, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(url, &lv_font_montserrat_20, 0);
+    lv_obj_set_pos(url, 16, 40);
+    lv_obj_t *port = lv_label_create(current);
+    lv_label_set_text_fmt(port, "Port %s", stats && stats->pool && stats->pool->port[0]
+                                             ? stats->pool->port : "--");
+    lv_obj_set_style_text_color(port, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(port, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(port, 16, 68);
+
+    const char *ip = wifi_get_current_ip();
+    bool ip_ok = ip && ip[0] && strcmp(ip, "0.0.0.0") != 0;
+    lv_obj_t *qr_bg = lv_obj_create(current);
+    lv_obj_set_size(qr_bg, 148, 148);
+    lv_obj_set_pos(qr_bg, 16, 102);
+    lv_obj_set_style_bg_color(qr_bg, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(qr_bg, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(qr_bg, 0, 0);
+    lv_obj_set_style_radius(qr_bg, 12, 0);
+    lv_obj_set_style_pad_all(qr_bg, 0, 0);
+    lv_obj_clear_flag(qr_bg, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    if (ip_ok) {
+        char dest[96];
+        snprintf(dest, sizeof(dest), "http://%s/#/pool", ip);
+        lv_obj_t *qr = lv_qrcode_create(qr_bg, 126, lv_color_black(), lv_color_white());
+        lv_qrcode_update(qr, dest, strlen(dest));
+        lv_obj_center(qr);
+    } else {
+        lv_obj_t *missing = lv_label_create(qr_bg);
+        lv_label_set_text(missing, "NO IP");
+        lv_obj_set_style_text_color(missing, lv_color_black(), 0);
+        lv_obj_set_style_text_font(missing, &lv_font_montserrat_18, 0);
+        lv_obj_center(missing);
+    }
+    lv_obj_t *qr_hint = lv_label_create(current);
+    lv_label_set_text(qr_hint, ip_ok ? "Scan to edit\nin AxeOS" : "Connect Wi-Fi\nto edit");
+    lv_obj_set_style_text_color(qr_hint, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(qr_hint, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_align(qr_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(qr_hint, 130);
+    lv_obj_set_pos(qr_hint, 178, 148);
+    lv_obj_t *privacy = lv_label_create(current);
+    lv_label_set_text(privacy, "Payout address stays private on this display.");
+    lv_label_set_long_mode(privacy, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(privacy, 290);
+    lv_obj_set_style_text_color(privacy, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(privacy, &lv_font_montserrat_12, 0);
+    lv_obj_set_pos(privacy, 16, 268);
+
+    lv_obj_t *latency = glass_settings_card(glass_settings_body, 356, 68, 378, 318);
+    lv_obj_t *lat_title = lv_label_create(latency);
+    lv_label_set_text(lat_title, "POOL LATENCY");
+    lv_obj_set_style_text_color(lat_title, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(lat_title, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(lat_title, 16, 14);
+    int n = poolping_count();
+    for (int rank = 0; rank < n && rank < 6; rank++) {
+        int idx = poolping_ranked(rank);
+        const pool_entry_t *entry = poolping_entry(idx);
+        lv_obj_t *row = lv_obj_create(latency);
+        lv_obj_set_size(row, 346, 42);
+        lv_obj_set_pos(row, 16, 42 + rank * 45);
+        lv_obj_set_style_bg_color(row, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_10, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_radius(row, 10, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t *name = lv_label_create(row);
+        lv_label_set_text(name, entry ? entry->label : "...");
+        lv_obj_set_width(name, 225);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_color(name, COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
+        lv_obj_align(name, LV_ALIGN_LEFT_MID, 12, 0);
+        glass_pool_values[rank] = lv_label_create(row);
+        lv_label_set_text(glass_pool_values[rank], "...");
+        lv_obj_set_style_text_color(glass_pool_values[rank], COLOR_ACCENT, 0);
+        lv_obj_set_style_text_font(glass_pool_values[rank], &lv_font_montserrat_14, 0);
+        lv_obj_align(glass_pool_values[rank], LV_ALIGN_RIGHT_MID, -12, 0);
+    }
+    poolping_refresh_now();
+    glass_settings_pool_refresh_cb(NULL);
+    glass_pool_timer = lv_timer_create(glass_settings_pool_refresh_cb, 1000, NULL);
+}
+
+static void glass_settings_dim_changed(lv_event_t *e)
+{
+    (void)e;
+    if (!display_dim_slider || !display_dim_value_label) return;
+    int value = lv_slider_get_value(display_dim_slider);
+    lv_label_set_text_fmt(display_dim_value_label, "%d%%", value);
+}
+
+static void glass_settings_dim_released(lv_event_t *e)
+{
+    settings_display_schedule_changed(e);
+}
+
+static void glass_settings_build_display(void)
+{
+    glass_settings_header("DISPLAY");
+    display_control_config_t cfg;
+    display_control_get_config(&cfg);
+
+    lv_obj_t *bright = glass_settings_card(glass_settings_body, 18, 68, 716, 82);
+    lv_obj_t *bright_title = lv_label_create(bright);
+    lv_label_set_text(bright_title, "Normal brightness");
+    lv_obj_set_style_text_color(bright_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(bright_title, &lv_font_montserrat_18, 0);
+    lv_obj_set_pos(bright_title, 16, 10);
+    brightness_slider = lv_slider_create(bright);
+    lv_obj_set_size(brightness_slider, 420, 22);
+    lv_obj_set_ext_click_area(brightness_slider, 14);
+    lv_obj_set_pos(brightness_slider, 190, 30);
+    lv_slider_set_range(brightness_slider, 5, 100);
+    lv_slider_set_value(brightness_slider, current_settings.brightness_percent, LV_ANIM_OFF);
+    glass_style_slider(brightness_slider);
+    lv_obj_add_event_cb(brightness_slider, settings_brightness_slider_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    brightness_value_label = lv_label_create(bright);
+    lv_label_set_text_fmt(brightness_value_label, "%d%%", current_settings.brightness_percent);
+    lv_obj_set_style_text_color(brightness_value_label, COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(brightness_value_label, &lv_font_montserrat_20, 0);
+    lv_obj_align(brightness_value_label, LV_ALIGN_RIGHT_MID, -14, 0);
+
+    display_section = glass_settings_card(glass_settings_body, 18, 162, 716, 150);
+    display_schedule_checkbox = settings_toggle_row(display_section,
+                                                     "Scheduled brightness reduction",
+                                                     8, 680, 54, true);
+    if (cfg.schedule_enabled) lv_obj_add_state(display_schedule_checkbox, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(display_schedule_checkbox, settings_display_schedule_changed,
+                        LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_t *from = lv_label_create(display_section);
+    lv_label_set_text(from, "DIM FROM");
+    lv_obj_set_style_text_color(from, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(from, &lv_font_montserrat_12, 0);
+    lv_obj_set_pos(from, 16, 72);
+    display_off_dropdown = lv_dropdown_create(display_section);
+    lv_obj_set_size(display_off_dropdown, 190, 50);
+    lv_obj_set_pos(display_off_dropdown, 16, 92);
+    lv_dropdown_set_options(display_off_dropdown, display_time_options);
+    lv_dropdown_set_selected(display_off_dropdown, cfg.off_minute / 30U);
+    glass_style_dropdown(display_off_dropdown);
+    lv_obj_add_event_cb(display_off_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_t *until = lv_label_create(display_section);
+    lv_label_set_text(until, "FULL FROM");
+    lv_obj_set_style_text_color(until, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(until, &lv_font_montserrat_12, 0);
+    lv_obj_set_pos(until, 220, 72);
+    display_on_dropdown = lv_dropdown_create(display_section);
+    lv_obj_set_size(display_on_dropdown, 190, 50);
+    lv_obj_set_pos(display_on_dropdown, 220, 92);
+    lv_dropdown_set_options(display_on_dropdown, display_time_options);
+    lv_dropdown_set_selected(display_on_dropdown, cfg.on_minute / 30U);
+    glass_style_dropdown(display_on_dropdown);
+    lv_obj_add_event_cb(display_on_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_t *dim = lv_label_create(display_section);
+    lv_label_set_text(dim, "DIM LEVEL");
+    lv_obj_set_style_text_color(dim, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(dim, &lv_font_montserrat_12, 0);
+    lv_obj_set_pos(dim, 428, 72);
+    display_dim_slider = lv_slider_create(display_section);
+    lv_obj_set_size(display_dim_slider, 190, 22);
+    lv_obj_set_ext_click_area(display_dim_slider, 14);
+    lv_obj_set_pos(display_dim_slider, 428, 108);
+    lv_slider_set_range(display_dim_slider, 5, 60);
+    lv_slider_set_value(display_dim_slider, cfg.dim_percent, LV_ANIM_OFF);
+    glass_style_slider(display_dim_slider);
+    lv_obj_add_event_cb(display_dim_slider, glass_settings_dim_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(display_dim_slider, glass_settings_dim_released, LV_EVENT_RELEASED, NULL);
+    display_dim_value_label = lv_label_create(display_section);
+    lv_label_set_text_fmt(display_dim_value_label, "%u%%", (unsigned)cfg.dim_percent);
+    lv_obj_set_style_text_color(display_dim_value_label, COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(display_dim_value_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_pos(display_dim_value_label, 632, 104);
+
+    lv_obj_t *power = glass_settings_card(glass_settings_body, 18, 324, 716, 62);
+    lv_obj_t *power_title = lv_label_create(power);
+    lv_label_set_text(power_title, "Display-off shortcut");
+    lv_obj_set_style_text_color(power_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(power_title, &lv_font_montserrat_16, 0);
+    lv_obj_align(power_title, LV_ALIGN_LEFT_MID, 16, 0);
+    display_corner_dropdown = lv_dropdown_create(power);
+    lv_obj_set_size(display_corner_dropdown, 320, 48);
+    lv_obj_align(display_corner_dropdown, LV_ALIGN_RIGHT_MID, -10, 0);
+    lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
+    lv_dropdown_set_selected(display_corner_dropdown,
+        (uint16_t)display_button_mode_from_config(cfg.power_button_corner,
+                                                 cfg.power_button_visuals_visible));
+    glass_style_dropdown(display_corner_dropdown);
+    lv_obj_add_event_cb(display_corner_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    display_schedule_status = lv_label_create(power);
+    lv_label_set_text(display_schedule_status, "");
+    lv_obj_add_flag(display_schedule_status, LV_OBJ_FLAG_HIDDEN);
+    settings_refresh_schedule_status();
+    display_schedule_timer = lv_timer_create(settings_schedule_timer_cb, 2000, NULL);
+}
+
+static void glass_settings_build_system(void)
+{
+    glass_settings_header("SYSTEM");
+    lv_obj_t *perf = glass_settings_card(glass_settings_body, 18, 68, 716, 92);
+    lv_obj_t *perf_title = lv_label_create(perf);
+    lv_label_set_text(perf_title, "Performance");
+    lv_obj_set_style_text_color(perf_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(perf_title, &lv_font_montserrat_18, 0);
+    lv_obj_set_pos(perf_title, 16, 10);
+    performance_low_btn = create_settings_button(perf, "LOW", settings_performance_low_clicked,
+                                                  current_settings.performance_mode == PERFORMANCE_LOW);
+    performance_medium_btn = create_settings_button(perf, "MEDIUM", settings_performance_medium_clicked,
+                                                     current_settings.performance_mode == PERFORMANCE_MEDIUM);
+    performance_high_btn = create_settings_button(perf, "HIGH", settings_performance_high_clicked,
+                                                   current_settings.performance_mode == PERFORMANCE_HIGH);
+    lv_obj_set_size(performance_low_btn, 205, 48);
+    lv_obj_set_size(performance_medium_btn, 205, 48);
+    lv_obj_set_size(performance_high_btn, 205, 48);
+    lv_obj_set_pos(performance_low_btn, 16, 38);
+    lv_obj_set_pos(performance_medium_btn, 246, 38);
+    lv_obj_set_pos(performance_high_btn, 476, 38);
+
+    lv_obj_t *fan = glass_settings_card(glass_settings_body, 18, 172, 716, 92);
+    auto_fan_checkbox = settings_toggle_row(fan, "Automatic fan control", 8, 330, 54, true);
+    if (current_settings.auto_fan_control) lv_obj_add_state(auto_fan_checkbox, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(auto_fan_checkbox, settings_auto_fan_toggled, LV_EVENT_VALUE_CHANGED, NULL);
+    fan_slider = lv_slider_create(fan);
+    lv_obj_set_size(fan_slider, 170, 22);
+    lv_obj_set_ext_click_area(fan_slider, 14);
+    lv_obj_set_pos(fan_slider, 350, 35);
+    lv_slider_set_range(fan_slider, 0, 100);
+    lv_slider_set_value(fan_slider, current_settings.fan_speed_percent, LV_ANIM_OFF);
+    glass_style_slider(fan_slider);
+    lv_obj_add_event_cb(fan_slider, settings_fan_slider_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    fan_value_label = lv_label_create(fan);
+    lv_label_set_text_fmt(fan_value_label, "%d%%", current_settings.fan_speed_percent);
+    lv_obj_set_style_text_color(fan_value_label, COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(fan_value_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_pos(fan_value_label, 528, 31);
+    lv_obj_t *fan_apply = create_settings_button(fan, "APPLY", settings_fan_save_clicked, false);
+    lv_obj_set_size(fan_apply, 110, 42);
+    lv_obj_set_pos(fan_apply, 590, 25);
+
+    ota_section = glass_settings_card(glass_settings_body, 18, 276, 716, 110);
+    ota_version_label = lv_label_create(ota_section);
+    lv_label_set_text_fmt(ota_version_label, "Firmware %s", ota_get_current_version());
+    lv_obj_set_style_text_color(ota_version_label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(ota_version_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_pos(ota_version_label, 16, 10);
+    ota_status_label = lv_label_create(ota_section);
+    lv_label_set_text(ota_status_label, "Ready for update");
+    lv_obj_set_width(ota_status_label, 350);
+    lv_label_set_long_mode(ota_status_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_color(ota_status_label, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(ota_status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_pos(ota_status_label, 16, 40);
+    ota_progress_bar = lv_bar_create(ota_section);
+    lv_obj_set_size(ota_progress_bar, 330, 12);
+    lv_obj_set_pos(ota_progress_bar, 16, 76);
+    lv_bar_set_range(ota_progress_bar, 0, 100);
+    lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
+    glass_style_bar(ota_progress_bar);
+    ota_update_btn = create_settings_button(ota_section, "UPDATE",
+                                             settings_ota_update_clicked, false);
+    lv_obj_set_size(ota_update_btn, 158, 54);
+    lv_obj_set_pos(ota_update_btn, 372, 28);
+    ota_restore_btn = create_settings_button(ota_section, "OFFICIAL RESTORE",
+                                              settings_original_restore_clicked, false);
+    lv_obj_set_size(ota_restore_btn, 158, 54);
+    lv_obj_set_pos(ota_restore_btn, 542, 28);
+    ota_restore_status_label = lv_label_create(ota_section);
+    lv_label_set_text(ota_restore_status_label, "Official release: check before restoring");
+    lv_obj_add_flag(ota_restore_status_label, LV_OBJ_FLAG_HIDDEN);
+    ota_timer = lv_timer_create(ota_update_timer_cb, 500, NULL);
+}
+
+static void glass_settings_render(void)
+{
+    if (!glass_settings_body) return;
+    glass_settings_stop_page_tasks();
+    glass_settings_reset_refs();
+    lv_obj_clean(glass_settings_body);
+    lv_obj_scroll_to_y(glass_settings_body, 0, LV_ANIM_OFF);
+    if (glass_settings_pane) lv_obj_scroll_to_y(glass_settings_pane, 0, LV_ANIM_OFF);
+    switch (glass_settings_page) {
+        case GLASS_SETTINGS_STYLE:   glass_settings_build_style();   break;
+        case GLASS_SETTINGS_POOL:    glass_settings_build_pool();    break;
+        case GLASS_SETTINGS_DISPLAY: glass_settings_build_display(); break;
+        case GLASS_SETTINGS_SYSTEM:  glass_settings_build_system();  break;
+        case GLASS_SETTINGS_HUB:
+        default:                     glass_settings_build_hub();     break;
+    }
+    lv_obj_update_layout(glass_settings_body);
+    lv_obj_scroll_to_y(glass_settings_body, 0, LV_ANIM_OFF);
+    if (glass_settings_pane) lv_obj_scroll_to_y(glass_settings_pane, 0, LV_ANIM_OFF);
+    glass_screen_ready(settings_screen);
+}
+
+static void glass_settings_screen_create(void)
+{
+    settings_screen = glass_screen_create(GLASS_SCREEN_SETTINGS, false);
+    glass_settings_pane = glass_pane(settings_screen, SCREEN_WIDTH - 48, 406, 26);
+    lv_obj_align(glass_settings_pane, LV_ALIGN_TOP_MID, 0, 18);
+    lv_obj_clear_flag(glass_settings_pane, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(glass_settings_pane, LV_SCROLLBAR_MODE_OFF);
+    glass_settings_body = lv_obj_create(glass_settings_pane);
+    lv_obj_set_size(glass_settings_body, SCREEN_WIDTH - 48, 406);
+    lv_obj_set_pos(glass_settings_body, 0, 0);
+    lv_obj_set_style_bg_opa(glass_settings_body, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(glass_settings_body, 0, 0);
+    lv_obj_set_style_pad_all(glass_settings_body, 0, 0);
+    lv_obj_clear_flag(glass_settings_body, LV_OBJ_FLAG_SCROLLABLE);
+    glass_settings_render();
+}
+
+void settings_glass_show_hub(void)
+{
+    glass_settings_page = GLASS_SETTINGS_HUB;
+    if (glass_settings_body) glass_settings_render();
+}
+
 void settings_screen_create(void)
 {
     if (settings_screen != NULL)
@@ -972,7 +1577,12 @@ void settings_screen_create(void)
     settings_initialize();
     display_control_set_power_button_visible(false);
 
-    const bool glass = glass_active();
+    if (glass_active()) {
+        glass_settings_screen_create();
+        return;
+    }
+
+    const bool glass = false;
     lv_obj_t *main_cont;
     if (glass)
     {
@@ -1336,13 +1946,13 @@ void settings_screen_create(void)
     if (glass) lv_obj_clear_flag(display_section, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *display_title = lv_label_create(display_section);
-    lv_label_set_text(display_title, "Display Schedule:");
+    lv_label_set_text(display_title, "Brightness Schedule:");
     lv_obj_set_style_text_color(display_title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(display_title, &lv_font_montserrat_18, 0);
     lv_obj_align(display_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     display_schedule_checkbox = settings_toggle_row(display_section,
-                                                    "Turn the display off daily",
+                                                    "Reduce brightness daily",
                                                     30, 660, 56, glass);
 
     display_schedule_status = lv_label_create(display_section);
@@ -1366,7 +1976,7 @@ void settings_screen_create(void)
     lv_obj_clear_flag(schedule_details_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *off_label = lv_label_create(schedule_details_cont);
-    lv_label_set_text(off_label, "Turns off at");
+    lv_label_set_text(off_label, "Dims at");
     lv_obj_set_style_text_color(off_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(off_label, &lv_font_montserrat_16, 0);
     lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -1381,7 +1991,7 @@ void settings_screen_create(void)
     if (glass) glass_style_dropdown(display_off_dropdown);
 
     lv_obj_t *on_label = lv_label_create(schedule_details_cont);
-    lv_label_set_text(on_label, "Turns on at");
+    lv_label_set_text(on_label, "Full brightness at");
     lv_obj_set_style_text_color(on_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(on_label, &lv_font_montserrat_16, 0);
     lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 0);
@@ -1555,10 +2165,9 @@ void settings_screen_destroy(void)
     /* This modal increments the global overlay depth. Balance it before its
      * parent screen is deleted during navigation or a theme/skin rebuild. */
     settings_restore_overlay_close(NULL);
-    if (display_schedule_timer) {
-        lv_timer_del(display_schedule_timer);
-        display_schedule_timer = NULL;
-    }
+    /* Stop page-owned timers before deleting the labels they update. */
+    glass_settings_stop_page_tasks();
+    memset(glass_pool_values, 0, sizeof(glass_pool_values));
     display_schedule_status = NULL;
     settings_main_cont = NULL;
     // Clean up Easter egg overlay if showing
@@ -1567,12 +2176,6 @@ void settings_screen_destroy(void)
         sys_overlay = NULL;
     }
     diag_counter = 0;
-
-    // Clean up OTA timer
-    if (ota_timer) {
-        lv_timer_del(ota_timer);
-        ota_timer = NULL;
-    }
 
     if (settings_screen)
     {
@@ -1590,6 +2193,10 @@ void settings_screen_destroy(void)
         fan_save_btn = NULL;
         brightness_slider = NULL;
         brightness_value_label = NULL;
+        display_dim_slider = NULL;
+        display_dim_value_label = NULL;
+        glass_settings_body = NULL;
+        glass_settings_pane = NULL;
         timezone_dropdown = NULL;
         theme_dropdown = NULL;
         display_schedule_checkbox = NULL;
@@ -1627,7 +2234,7 @@ static void settings_refresh_schedule_status(void)
     }
 
     if (!lv_obj_has_state(display_schedule_checkbox, LV_STATE_CHECKED)) {
-        lv_label_set_text(display_schedule_status, "The display stays on all day");
+        lv_label_set_text(display_schedule_status, "Full brightness all day");
         return;
     }
     if (!display_control_time_is_set()) {
@@ -1636,8 +2243,8 @@ static void settings_refresh_schedule_status(void)
         return;
     }
     lv_label_set_text(display_schedule_status,
-                      display_control_is_backlight_on() ? "Active: the display is on now"
-                                                        : "Active: the display is off now");
+                      display_control_is_dimmed() ? "Active: reduced brightness now"
+                                                  : "Active: full brightness now");
 }
 
 static void settings_schedule_timer_cb(lv_timer_t *t)
@@ -1824,8 +2431,8 @@ void settings_brightness_slider_changed(lv_event_t *e)
         lv_label_set_text(brightness_value_label, brightness_text);
     }
 
-    // Apply brightness change immediately
-    lcd_backlight_set_brightness(current_settings.brightness_percent);
+    // Apply the normal level immediately; an active schedule keeps its lower level.
+    display_control_set_brightness((uint8_t)current_settings.brightness_percent);
 
     printf("Screen brightness set to: %d%%\n", current_settings.brightness_percent);
 }
@@ -1848,10 +2455,15 @@ static void settings_display_schedule_changed(lv_event_t *e)
     display_power_button_mode_t button_mode =
         (display_power_button_mode_t)lv_dropdown_get_selected(display_corner_dropdown);
 
+    display_control_config_t existing;
+    display_control_get_config(&existing);
     display_control_config_t config = {
         .schedule_enabled = lv_obj_has_state(display_schedule_checkbox, LV_STATE_CHECKED),
         .off_minute = (uint16_t)(lv_dropdown_get_selected(display_off_dropdown) * 30U),
         .on_minute = (uint16_t)(lv_dropdown_get_selected(display_on_dropdown) * 30U),
+        .dim_percent = display_dim_slider
+                         ? (uint8_t)lv_slider_get_value(display_dim_slider)
+                         : existing.dim_percent,
         .power_button_corner = display_button_mode_corner(button_mode),
         .power_button_visuals_visible = display_button_mode_shows_visuals(button_mode),
     };

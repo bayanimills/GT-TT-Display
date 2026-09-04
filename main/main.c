@@ -6,6 +6,7 @@
 #include "poolping.h"
 #include "ota_update.h"
 #include "display_control.h"
+#include "feed_web.h"
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -40,6 +41,13 @@ void app_main()
     wavesahre_rgb_lcd_bl_on();
     /* Timezone must be applied before the display schedule can be judged. */
     settings_initialize();
+
+    /* The RSS worker waits for the display's own STA address before opening
+     * its token-protected LAN editor or fetching. It is safe to start before
+     * the BAP Wi-Fi credentials arrive. */
+    if (!feed_web_init()) {
+        ESP_LOGW(TAG, "RSS feed service could not start");
+    }
 
     /* Starts the chain refresh task. It waits for the TCP/IP stack and an
      * associated radio before its first fetch, so the odds screen has a

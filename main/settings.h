@@ -35,6 +35,9 @@ void settings_theme_changed(lv_event_t * e);
 /* Rebuild the settings screen so a new theme's colours take effect.
  * Registered with theme_register_reload() at boot. */
 void settings_rebuild_for_theme(void);
+/* Bottom navigation always enters Glass through the category hub, even when
+ * the cached Settings screen was last left on a detail page. */
+void settings_glass_show_hub(void);
 void settings_home_clicked(lv_event_t * e);
 void settings_block_clicked(lv_event_t * e);
 void settings_clock_clicked(lv_event_t * e);

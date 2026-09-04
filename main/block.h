@@ -8,7 +8,7 @@ void block_screen_destroy(void);
 lv_obj_t *block_get_screen(void);
 void block_update_height(const char *height);
 
-/* Last height received over BAP, formatted; "0000000" until the first one. */
+/* Last height received over BAP; "--" until the first. */
 const char *block_get_height_text(void);
 
 void block_home_clicked(lv_event_t *e);

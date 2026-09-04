@@ -28,7 +28,19 @@ PRESETS = [
     "Nord", "Gruvbox", "Paper (light)", "Mono",
 ]
 SCREENS = ["home", "night", "block", "clock", "price", "mempool", "wifi", "settings",
-           "odds", "payout"]
+           "odds", "payout", "feed"]
+
+# Night and Payout remain valid explicit simulator destinations, and Classic
+# still uses both. They are deliberately absent only from a complete Glass
+# review set: Glass folds their useful information into its main surface.
+ALL_SCREEN_EXCLUSIONS = {
+    "glass": frozenset(("night", "payout")),
+}
+
+
+def review_screens(skin_name):
+    excluded = ALL_SCREEN_EXCLUSIONS.get(skin_name, ())
+    return [screen for screen in SCREENS if screen not in excluded]
 
 # Coordinates cover values, not labels, for both Classic and Glass. Keep this
 # separate from WARMUP: redaction also protects captures made with caller-
@@ -206,7 +218,7 @@ def main():
     ap.add_argument("outdir")
     ap.add_argument("--screen", default="home", choices=SCREENS)
     ap.add_argument("--all-screens", action="store_true",
-                    help="capture every known screen in this one simulator process")
+                    help="capture the standard review screens in one process (Glass omits Night/Payout)")
     ap.add_argument("--skin", choices=("classic", "glass", "both"), default=None,
                     help="force one or both skins; omitted preserves the current/--cmd K skin")
     ap.add_argument("--preset", type=int, choices=range(len(PRESETS)), default=None)
@@ -249,14 +261,18 @@ def main():
 
     os.makedirs(args.outdir, exist_ok=True)
     presets = [args.preset] if args.preset is not None else list(range(len(PRESETS)))
-    screens = list(SCREENS) if args.all_screens else [args.screen]
     if args.skin == "both":
         skins = [("classic", 0), ("glass", 1)]
     elif args.skin:
         skins = [(args.skin, 0 if args.skin == "classic" else 1)]
     else:
         skins = [(None, None)]
-    capture_count = len(presets) * len(screens) * len(skins)
+    # Count the jobs that will actually run. Glass intentionally has two fewer
+    # all-screen destinations than Classic, which the old cartesian product
+    # could not represent accurately.
+    capture_count = len(presets) * sum(
+        len(review_screens(skin_name)) if args.all_screens else 1
+        for skin_name, _ in skins)
 
     def capture_name(screen, preset, skin_name):
         if args.name:
@@ -324,6 +340,7 @@ def main():
         pre = [c for c in args.cmd if c.startswith("K ")]
         post = [c for c in args.cmd if not c.startswith("K ")]
         for skin_name, skin_index in skins:
+            screens = review_screens(skin_name) if args.all_screens else [args.screen]
             for c in pre:
                 sim.send(c)
             if skin_index is not None:

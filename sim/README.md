@@ -51,9 +51,13 @@ python3 shot.py shots --all-screens --preset 0 --skin both
 ```
 
 Useful for eyeballing a palette across screens, or attaching before/after
-images to a PR. `--all-screens` walks every entry in the simulator's screen
-list without restarting it; `--skin classic|glass|both` makes review sets
-deterministic instead of depending on persisted simulator preferences.
+images to a PR. `--all-screens` walks the review screens without restarting
+the simulator and includes the Activity Feed. Classic captures all eleven
+screens; Glass captures nine because Night and Payout are intentionally folded
+into the Glass home surface and omitted from its batch. Explicit `--screen
+night|payout --skin glass` captures remain available for targeted checks.
+`--skin classic|glass|both` makes review sets deterministic instead of
+depending on persisted simulator preferences.
 
 Review screenshots are privacy-safe by default: the payout address and the
 Wi-Fi SSID/IP/password fields are visibly redacted before PNG encoding. The values in
@@ -101,10 +105,10 @@ P <index>           select theme preset
 S <slot> <rrggbb>   override one palette slot
 C                   commit theme (persist + rebuild screen)
 K <skin>            select skin: 0 classic, 1 glass (home rebuilds)
-G <what> <value>    glass skin: layout 0|1, widgets <hexmask>, wall <index>,
-                    drawer 0|1, sheet 0..5 (widgets, layout, style, pool;
-                    5 also opens style), scroll <px>
+G <what> <value>    glass test helpers: layout 0|1, widgets <hexmask>,
+                    wall <index>, sheet 0..5
 N <screen>          home night block clock price mempool wifi settings odds
+                    payout feed
 D off | D mode <n>  display off (as the corner control); button mode 0..3
 U [original] <0|1>  fake an available fork/official release
 O show | O progress <n> | O error <text> | O hide
@@ -124,16 +128,17 @@ pickers can be rendered headlessly:
 ```bash
 python3 shot.py out --preset 0 --cmd "K 1" --name glass-twin
 python3 shot.py out --preset 0 --cmd "K 1" --cmd "G layout 0" --name glass-single
-python3 shot.py out --preset 0 --cmd "K 1" --cmd "G drawer 1" --name glass-drawer
+python3 shot.py out --screen settings --preset 0 --cmd "K 1" --name glass-settings
 python3 shot.py out --preset 0 --cmd "K 1" --cmd "G sheet 3" --name glass-wallpapers
-python3 shot.py out --preset 0 --cmd "K 1" --touch 400,300 --touch 47,395   # tap to open the drawer, tap Widgets
-python3 shot.py out --preset 0 --cmd "K 1" --drag 400,400,400,120           # scroll the widget grid
+python3 shot.py out --preset 0 --cmd "K 1" --touch 400,470                  # bottom tap opens Settings
+python3 shot.py out --screen settings --preset 0 --cmd "K 1" --touch 126,325 # open Style
 ```
 
-Every screen has a Glass form, so `--screen settings --cmd "K 1"` renders the
-glass settings and so on. `--online` lets price and mempool fetch for real
-through `curl` (pair it with `--settle 12`), and `SIM_DEBUG=1` in the
-environment lets the firmware log through to the terminal.
+Screens in the standard Glass review set have Glass forms, so `--screen
+settings --cmd "K 1"` renders the Glass settings and so on. `--online` lets
+price and mempool fetch for real through `curl` (pair it with `--settle 12`),
+and `SIM_DEBUG=1` in the environment lets the firmware log through to the
+terminal.
 
 Glass preferences persist to `sim_nvs.txt` like everything else, so delete it
 between runs if you want the defaults back.

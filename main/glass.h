@@ -10,7 +10,7 @@
  * Two layers live here. The home surface: a full-screen wallpaper with a
  * user-chosen set of frosted widgets, sheets for choosing widgets, layout and
  * wallpaper. And the chrome every other screen borrows under Glass: a
- * wallpapered screen, frosted panes, the tap-to-reveal bottom drawer that
+ * wallpapered screen, frosted panes, a bottom Settings affordance that
  * replaces the classic nav bar, and widget styling that stays legible over a
  * wallpaper.
  *
@@ -64,6 +64,7 @@ typedef enum {
     GLASS_SCREEN_NIGHT,
     GLASS_SCREEN_ODDS,
     GLASS_SCREEN_PAYOUT,
+    GLASS_SCREEN_FEED,
     GLASS_SCREEN_COUNT
 } glass_screen_t;
 
@@ -88,7 +89,7 @@ const char    *glass_widget_name(glass_widget_t id);
 /* True when the Glass skin is selected. */
 bool glass_active(void);
 
-/* A screen with the wallpaper behind it and the drawer one tap away. `dim`
+/* A screen with the wallpaper behind it and Settings one bottom tap away. `dim`
  * is for the night screen: wallpaper at a fifth of its brightness over black,
  * and panes made on it are dark slabs rather than bright frost. */
 lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim);
@@ -101,8 +102,8 @@ void glass_screen_detach(lv_obj_t *scr);
  * it fall through to the screen, so the drawer opens from anywhere. */
 lv_obj_t *glass_pane(lv_obj_t *parent, int w, int h, int radius);
 
-/* Make taps on a scrollable container (which must stay clickable to scroll)
- * open the drawer like taps on the screen do. */
+/* Legacy compatibility hook. Full-screen Glass pages no longer open a drawer
+ * from content taps, so this intentionally leaves `obj` untouched. */
 void glass_attach_drawer_toggle(lv_obj_t *obj);
 
 /* A screen may claim the tap that would otherwise toggle the drawer: the

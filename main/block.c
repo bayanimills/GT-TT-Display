@@ -19,9 +19,11 @@ static lv_obj_t *block_height_label = NULL;
 static lv_obj_t *block_title_label = NULL;
 static lv_obj_t *block_halving_value = NULL;
 static lv_obj_t *block_retarget_value = NULL;
+static lv_obj_t *block_fee_value = NULL;
 static lv_timer_t *block_network_timer = NULL;
 
-static char current_block_height_text[24] = "0000000";
+static char current_block_height_text[24] = "--";
+static char current_block_height_display[24] = "--";
 
 static lv_obj_t *create_bottom_nav_btn(lv_obj_t *parent, const char *symbol, lv_event_cb_t event_cb, bool active);
 static lv_obj_t *create_bottom_nav_btn_img(lv_obj_t *parent, const lv_img_dsc_t *img_dsc, lv_event_cb_t event_cb, bool active);
@@ -36,17 +38,12 @@ void block_screen_create(void)
         return;
     }
 
-    /* Under Glass the figure sits on one pane over the wallpaper and the
-     * drawer replaces the nav bar; the labels are the same either way. */
+    /* Both skins use the same fixed hierarchy: title, one hero and two
+     * supporting facts. Nothing important is hidden behind a gesture. */
     const bool glass = glass_active();
-    lv_obj_t *parent;
     if (glass)
     {
         block_screen = glass_screen_create(GLASS_SCREEN_BLOCK, false);
-        /* Shorter than a centred pane so the halving and retarget row has
-         * somewhere to sit underneath it. */
-        parent = glass_pane(block_screen, 720, 252, 28);
-        lv_obj_align(parent, LV_ALIGN_TOP_MID, 0, 60);
     }
     else
     {
@@ -55,23 +52,56 @@ void block_screen_create(void)
         lv_obj_set_style_bg_opa(block_screen, LV_OPA_COVER, 0);
         lv_obj_clear_flag(block_screen, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_scrollbar_mode(block_screen, LV_SCROLLBAR_MODE_OFF);
-        parent = block_screen;
     }
 
-    block_title_label = lv_label_create(parent);
-    lv_label_set_text(block_title_label, "CURRENT BLOCK HEIGHT");
-    lv_obj_set_style_text_color(block_title_label, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(block_title_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(block_title_label, LV_ALIGN_TOP_MID, 0, 30);
+    block_title_label = lv_label_create(block_screen);
+    lv_label_set_text(block_title_label, "BLOCKCHAIN");
+    lv_obj_set_style_text_color(block_title_label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(block_title_label, &lv_font_montserrat_24, 0);
+    lv_obj_align(block_title_label, LV_ALIGN_TOP_MID, 0, 14);
+    if (glass) glass_pill_label(block_title_label, false);
 
-    block_height_label = lv_label_create(parent);
-    lv_label_set_text(block_height_label, current_block_height_text);
+    lv_obj_t *subtitle = lv_label_create(block_screen);
+    lv_label_set_text(subtitle, "CURRENT TIP");
+    lv_obj_set_style_text_color(subtitle, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_14, 0);
+    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 45);
+    if (glass) glass_pill_label(subtitle, false);
+
+    lv_obj_t *hero;
+    if (glass)
+    {
+        hero = glass_pane(block_screen, 744, 190, 26);
+    }
+    else
+    {
+        hero = lv_obj_create(block_screen);
+        lv_obj_set_size(hero, 744, 190);
+        lv_obj_set_style_bg_color(hero, COLOR_CARD_BG, 0);
+        lv_obj_set_style_bg_opa(hero, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_color(hero, COLOR_BORDER, 0);
+        lv_obj_set_style_border_width(hero, 1, 0);
+        lv_obj_set_style_radius(hero, 18, 0);
+        lv_obj_set_style_shadow_width(hero, 0, 0);
+        lv_obj_set_style_pad_all(hero, 0, 0);
+        lv_obj_clear_flag(hero, LV_OBJ_FLAG_SCROLLABLE);
+    }
+    lv_obj_align(hero, LV_ALIGN_TOP_MID, 0, 72);
+
+    lv_obj_t *hero_caption = lv_label_create(hero);
+    lv_label_set_text(hero_caption, "BLOCK HEIGHT");
+    lv_obj_set_style_text_color(hero_caption, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(hero_caption, &lv_font_montserrat_14, 0);
+    lv_obj_align(hero_caption, LV_ALIGN_TOP_MID, 0, 18);
+
+    block_height_label = lv_label_create(hero);
+    lv_label_set_text(block_height_label, current_block_height_display);
     lv_obj_set_style_text_color(block_height_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(block_height_label, &montserrat_140, 0);
-    lv_obj_set_style_text_letter_space(block_height_label, 15, 0);
+    lv_obj_set_style_text_letter_space(block_height_label, 6, 0);
     lv_obj_set_style_text_align(block_height_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(block_height_label, glass ? 680 : SCREEN_WIDTH - 40);
-    lv_obj_align(block_height_label, LV_ALIGN_CENTER, 0, glass ? 18 : -46);
+    lv_obj_set_width(block_height_label, 710);
+    lv_obj_align(block_height_label, LV_ALIGN_CENTER, 0, 18);
 
     /* The two countdowns hang off the screen, not the pane, so they clear the
      * height figure in both skins. */
@@ -128,6 +158,7 @@ void block_screen_destroy(void)
         block_title_label = NULL;
         block_halving_value = NULL;
         block_retarget_value = NULL;
+        block_fee_value = NULL;
     }
 }
 
@@ -153,11 +184,14 @@ void block_update_height(const char *height)
     {
         parsed_height -= 1;
     }
-    snprintf(current_block_height_text, sizeof(current_block_height_text), "%ld", parsed_height);
+    snprintf(current_block_height_text, sizeof(current_block_height_text), "%ld",
+             parsed_height);
+    chain_fmt_grouped(parsed_height, current_block_height_display,
+                      sizeof(current_block_height_display));
 
     if (block_height_label)
     {
-        lv_label_set_text(block_height_label, current_block_height_text);
+        lv_label_set_text(block_height_label, current_block_height_display);
     }
 }
 
@@ -165,11 +199,11 @@ static void apply_cached_block_height(void)
 {
     if (block_height_label)
     {
-        lv_label_set_text(block_height_label, current_block_height_text);
+        lv_label_set_text(block_height_label, current_block_height_display);
     }
 }
 
-/* One of the two countdown cells: a caption over a value. */
+/* One of the compact network cells: a caption over a value. */
 static lv_obj_t *block_network_cell(lv_obj_t *host, const char *caption,
                                     int x, int y, int w, int h, bool glass,
                                     lv_obj_t **out_value)
@@ -201,13 +235,16 @@ static lv_obj_t *block_network_cell(lv_obj_t *host, const char *caption,
     lv_label_set_text(cap, caption);
     lv_obj_set_style_text_color(cap, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(cap, &lv_font_montserrat_14, 0);
-    lv_obj_align(cap, LV_ALIGN_TOP_MID, 0, 9);
+    lv_obj_align(cap, LV_ALIGN_TOP_MID, 0, 18);
 
     lv_obj_t *val = lv_label_create(cell);
     lv_label_set_text(val, "--");
     lv_obj_set_style_text_color(val, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(val, &lv_font_montserrat_22, 0);
-    lv_obj_align(val, LV_ALIGN_TOP_MID, 0, 30);
+    lv_obj_set_style_text_font(val, &lv_font_montserrat_24, 0);
+    lv_obj_set_width(val, w - 24);
+    lv_label_set_long_mode(val, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(val, LV_ALIGN_CENTER, 0, 16);
 
     *out_value = val;
     return cell;
@@ -221,14 +258,15 @@ static void block_network_timer_cb(lv_timer_t *t)
 
 static void block_build_network_row(lv_obj_t *host, bool glass)
 {
-    const int cell_w = 360;
-    const int cell_h = 68;
-    const int gap    = 20;
-    const int x      = (SCREEN_WIDTH - (cell_w * 2 + gap)) / 2;
-    const int y      = 332;
+    const int cell_w = 238;
+    const int cell_h = 112;
+    const int gap    = 15;
+    const int x      = (SCREEN_WIDTH - (cell_w * 3 + gap * 2)) / 2;
+    const int y      = 282;
 
-    block_network_cell(host, "HALVING IN",    x,                  y, cell_w, cell_h, glass, &block_halving_value);
-    block_network_cell(host, "NEXT RETARGET", x + cell_w + gap,   y, cell_w, cell_h, glass, &block_retarget_value);
+    block_network_cell(host, "HALVING",       x,                    y, cell_w, cell_h, glass, &block_halving_value);
+    block_network_cell(host, "NEXT RETARGET", x + cell_w + gap,     y, cell_w, cell_h, glass, &block_retarget_value);
+    block_network_cell(host, "FEE RATE",      x + (cell_w + gap)*2, y, cell_w, cell_h, glass, &block_fee_value);
 
     /* The snapshot lands on the chain task's schedule, so poll it rather than
      * reaching into chain.c for a callback. A minute is far finer than the
@@ -270,6 +308,22 @@ static void block_refresh_network(void)
             snprintf(buf, sizeof(buf), "--");
         }
         lv_label_set_text(block_retarget_value, buf);
+    }
+
+    if (block_fee_value)
+    {
+        if (d->fees_valid && d->fee_fastest > 0.0)
+        {
+            if (d->fee_fastest < 10.0)
+                snprintf(buf, sizeof(buf), "%.1f sat/vB", d->fee_fastest);
+            else
+                snprintf(buf, sizeof(buf), "%.0f sat/vB", d->fee_fastest);
+        }
+        else
+        {
+            snprintf(buf, sizeof(buf), "--");
+        }
+        lv_label_set_text(block_fee_value, buf);
     }
 }
 

@@ -18,6 +18,8 @@ A sophisticated touchscreen display addon for Bitaxe miners, featuring a 4.3-inc
 - **WiFi Configuration**: Touch-friendly network setup interface
 - **Settings Management**: Hardware configuration, display preferences, mining parameters
 - **Smooth UI**: LVGL-powered interface with custom fonts and graphics
+- **Glass UI**: Fixed, no-scroll card screens with a Bitcoin Orange accent and large touch targets
+- **Activity Feed**: Four-item RSS/Atom feed configured from a token-protected phone page on the local network
 - **Power Efficient**: Optimized for continuous operation with mining hardware
 
 - **Screen Simulator**: run the real UI on a workstation, no hardware required (see below)
@@ -117,6 +119,11 @@ The primary screen displays real-time mining information:
 - **Hardware Info**: Device model, ASIC type, fan speed
 - **Navigation Cards**: Touch-friendly access to all features
 
+In the Glass interface, tap any of the five Home slots (Hero, top-left,
+top-right, bottom-left, or bottom-right) to choose its metric. Tapping the
+bottom grabber replaces the current screen with the fixed Settings hub; it is
+not a scrolling drawer.
+
 ### Solo Odds (`odds.c`)
 What the miner's own hashrate is worth against the live network:
 
@@ -148,7 +155,7 @@ no separate exchange-rate provider.
 ### Settings Interface (`settings.c`)
 Comprehensive configuration options:
 
-- **Display Settings**: Brightness control, manual backlight power, and an optional daily on/off schedule
+- **Display Settings**: Normal brightness, manual backlight power, and an optional scheduled brightness reduction
 - **Mining Parameters**: Frequency, voltage, fan control
 - **Network Config**: WiFi SSID/password setup
 - **Hardware Control**: ASIC voltage, automatic fan control
@@ -170,8 +177,17 @@ Touch-optimized network configuration:
 - **Connection Status**: Real-time connection feedback
 - **Signal Strength**: Visual indicator for network quality
 
-### Night Mode
-Night friendly mode with reduced brightness and eye-friendly colors
+### Activity Feed (`feed.c`, `feed_web.c`)
+The Feed screen mixes recent miner, pool, and network activity with up to four
+RSS or Atom headlines. Tap **Edit** to show the phone workflow. Once the
+display has its own Wi-Fi address, it presents a QR code for a token-protected
+local configuration page; the token is never printed or logged.
+
+### Scheduled dimming
+Glass does not expose a separate Night page. Instead, Display settings can
+reduce brightness between two selected times and restore the normal level in
+the morning. The legacy Classic Night screen remains available for Classic UI
+compatibility.
 
 - **Hashrate**: Live hashrate over the past 5 minutes.
 

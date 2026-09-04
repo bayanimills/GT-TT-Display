@@ -15,6 +15,7 @@
 #include "night.h"
 #include "odds.h"
 #include "payout.h"
+#include "feed.h"
 #include "chain.h"
 #include "poolping.h"
 #include "ota_update.h"
@@ -43,8 +44,8 @@ static const char *TAG = "glass";
 #define TWIN_W        ((CONTENT_W - GAP) / 2)                /* 368 */
 #define HERO_H        168
 #define TWIN_H        116
-#define SINGLE_H      88
 #define CARD_RADIUS   24
+#define HOME_SLOT_COUNT 5
 
 #define DRAWER_H      308
 #define DRAWER_MARGIN 14
@@ -181,6 +182,9 @@ static void interceptors_drop_host(lv_obj_t *host)
 static lv_obj_t *s_screen       = NULL;
 static lv_obj_t *s_grid         = NULL;
 static lv_timer_t *s_refresh    = NULL;
+static lv_obj_t *s_slot_picker  = NULL;
+static lv_obj_t *s_slot_picker_host = NULL;
+static int       s_slot_picker_slot = -1;
 
 /* Drawer and sheets. */
 static lv_obj_t *s_drawer_scrim = NULL;
@@ -228,6 +232,10 @@ static const char *k_widget_names[GLASS_WIDGET_COUNT] = {
     "Solo odds",
 };
 
+static const char *k_home_slot_names[HOME_SLOT_COUNT] = {
+    "Hero", "Top left", "Top right", "Bottom left", "Bottom right",
+};
+
 /* Icon tint choices offered in the drawer. 0 means follow the palette. */
 typedef struct { const char *name; uint32_t rgb; } icon_choice_t;
 static const icon_choice_t k_icon_choices[] = {
@@ -244,6 +252,7 @@ static void frost_settle_timer_cb(lv_timer_t *timer);
 static void drawer_toggle_cb(lv_event_t *e);
 static void drawer_reset(void);
 static void sheet_reset(void);
+static void slot_picker_close(void);
 
 /* ---------------- preferences ---------------- */
 
@@ -1144,6 +1153,11 @@ static void card_refresh(card_t *c)
     switch (c->id) {
     case GLASS_WIDGET_HASHRATE: {
         const char *hr = nz(st->hashrate, "");
+        if (!c->value2 || !c->unit || !c->aux) {
+            snprintf(buf, sizeof(buf), "%s GH/s", hr[0] ? hr : "--");
+            set_if_changed(c->value, buf);
+            break;
+        }
         if (hr[0]) {
             const char *dot = strchr(hr, '.');
             size_t n = dot ? (size_t) (dot - hr) : strlen(hr);
@@ -1285,10 +1299,18 @@ static const char *widget_caption(glass_widget_t id)
     }
 }
 
+static bool home_slots_contain(glass_widget_t id)
+{
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+        if (s_order[i] == (uint8_t) id) return true;
+    }
+    return false;
+}
+
 static bool widget_has_sub(glass_widget_t id)
 {
     /* Power carries efficiency only when the hero is not already showing it. */
-    if (id == GLASS_WIDGET_POWER) return !(s_mask & (1u << GLASS_WIDGET_HASHRATE));
+    if (id == GLASS_WIDGET_POWER) return !home_slots_contain(GLASS_WIDGET_HASHRATE);
     return id == GLASS_WIDGET_POOL || id == GLASS_WIDGET_PRICE ||
            id == GLASS_WIDGET_MEMPOOL || id == GLASS_WIDGET_CLOCK ||
            id == GLASS_WIDGET_HALVING || id == GLASS_WIDGET_ODDS;
@@ -1309,6 +1331,27 @@ static void build_hero(card_t *c)
 
     lv_obj_t *cap = glass_caption(card, widget_caption(c->id));
     lv_obj_set_pos(cap, corner_left ? 26 + 60 : 26, 18);
+
+    if (c->id != GLASS_WIDGET_HASHRATE) {
+        int left = corner_left ? 86 : 26;
+        int right = corner_right ? 86 : 26;
+        widget_icon(card, c->id, left, 48);
+
+        const lv_font_t *vf = c->id == GLASS_WIDGET_POOL
+                            ? &lv_font_montserrat_28 : &lv_font_montserrat_48;
+        c->value = glass_label(card, "--", vf, LV_OPA_COVER);
+        lv_obj_set_width(c->value, CONTENT_W - left - right - 42);
+        lv_label_set_long_mode(c->value, LV_LABEL_LONG_DOT);
+        lv_obj_set_pos(c->value, left + 42, 54);
+
+        if (widget_has_sub(c->id)) {
+            c->sub = glass_subvalue(card, "");
+            lv_obj_set_width(c->sub, CONTENT_W - left - right);
+            lv_label_set_long_mode(c->sub, LV_LABEL_LONG_DOT);
+            lv_obj_align(c->sub, LV_ALIGN_BOTTOM_LEFT, left, -18);
+        }
+        return;
+    }
 
     c->value = glass_label(card, "--", &montserrat_120, LV_OPA_COVER);
     lv_obj_align(c->value, LV_ALIGN_LEFT_MID, 22, 14);
@@ -1351,28 +1394,133 @@ static void build_twin_card(card_t *c)
     }
 }
 
-static void build_single_card(card_t *c)
+static void slot_picker_close_cb(lv_event_t *e)
 {
-    lv_obj_t *card = glass_panel_create(s_grid, CONTENT_W, SINGLE_H, CARD_RADIUS);
-    c->card = card;
+    (void) e;
+    slot_picker_close();
+}
 
-    widget_icon(card, c->id, 26, (SINGLE_H - 24) / 2);
-    lv_obj_t *cap = glass_caption(card, widget_caption(c->id));
-    lv_obj_align(cap, LV_ALIGN_LEFT_MID, 64, widget_has_sub(c->id) ? -13 : 0);
+static void slot_picker_close(void)
+{
+    if (!s_slot_picker) return;
+    lv_obj_t *picker = s_slot_picker;
+    s_slot_picker = NULL;
+    s_slot_picker_host = NULL;
+    s_slot_picker_slot = -1;
+    unregister_frost(picker);
+    lv_obj_del(picker);
+    display_control_pop_overlay();
+}
 
-    if (widget_has_sub(c->id)) {
-        c->sub = glass_subvalue(card, "");
-        lv_obj_set_width(c->sub, 330);
-        lv_label_set_long_mode(c->sub, LV_LABEL_LONG_DOT);
-        lv_obj_align(c->sub, LV_ALIGN_LEFT_MID, 64, 13);
+static void slot_picker_pick_cb(lv_event_t *e)
+{
+    int id = (int) (intptr_t) lv_event_get_user_data(e);
+    int slot = s_slot_picker_slot;
+    if (slot < 0 || slot >= HOME_SLOT_COUNT || id < 0 || id >= GLASS_WIDGET_COUNT) return;
+
+    int from = -1;
+    for (int i = 0; i < GLASS_WIDGET_COUNT; i++) {
+        if (s_order[i] == (uint8_t) id) {
+            from = i;
+            break;
+        }
+    }
+    if (from < 0) return; /* prefs_load() guarantees a permutation */
+
+    uint8_t old = s_order[slot];
+    s_order[slot] = (uint8_t) id;
+    s_order[from] = old;
+    prefs_save();
+    slot_picker_close();
+    if (s_screen) lv_async_call(rebuild_grid_async, NULL);
+}
+
+static void slot_picker_open(int slot)
+{
+    if (!s_screen || slot < 0 || slot >= HOME_SLOT_COUNT) return;
+    if (s_slot_picker) slot_picker_close();
+    if (s_drawer_open || s_drawer_anim || s_sheet != GLASS_SHEET_NONE) return;
+
+    s_slot_picker_slot = slot;
+    s_slot_picker_host = s_screen;
+    display_control_push_overlay();
+
+    s_slot_picker = glass_panel_create(s_screen, SCREEN_WIDTH, SCREEN_HEIGHT, 0);
+    if (!s_slot_picker) {
+        s_slot_picker_host = NULL;
+        s_slot_picker_slot = -1;
+        display_control_pop_overlay();
+        return;
+    }
+    lv_obj_set_pos(s_slot_picker, 0, 0);
+    lv_obj_add_flag(s_slot_picker, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_slot_picker, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(s_slot_picker, LV_SCROLLBAR_MODE_OFF);
+
+    char title[40];
+    snprintf(title, sizeof(title), "Choose %s", k_home_slot_names[slot]);
+    lv_obj_t *heading = glass_label(s_slot_picker, title, &lv_font_montserrat_24, LV_OPA_COVER);
+    lv_obj_set_pos(heading, 26, 16);
+    lv_obj_t *hint = glass_label(s_slot_picker, "Tap a metric to place it in this slot",
+                                 &lv_font_montserrat_14, CAPTION_OPA);
+    lv_obj_set_pos(hint, 26, 50);
+
+    lv_obj_t *close = lv_obj_create(s_slot_picker);
+    lv_obj_set_size(close, 52, 52);
+    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -18, 12);
+    lv_obj_set_style_radius(close, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(close, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(close, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(close, 0, 0);
+    lv_obj_set_style_pad_all(close, 0, 0);
+    lv_obj_clear_flag(close, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(close, slot_picker_close_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *x = glass_label(close, LV_SYMBOL_CLOSE, &lv_font_montserrat_16, LV_OPA_COVER);
+    lv_obj_center(x);
+
+    const int tile_w = 176, tile_h = 78, col_gap = 12, row_gap = 10;
+    const int grid_x = 24, grid_y = 88;
+    for (int id = 0; id < GLASS_WIDGET_COUNT; id++) {
+        int col = id % 4, row = id / 4;
+        lv_obj_t *tile = lv_obj_create(s_slot_picker);
+        lv_obj_set_size(tile, tile_w, tile_h);
+        lv_obj_set_pos(tile, grid_x + col * (tile_w + col_gap),
+                       grid_y + row * (tile_h + row_gap));
+        bool selected = s_order[slot] == (uint8_t) id;
+        lv_obj_set_style_radius(tile, 18, 0);
+        lv_obj_set_style_bg_color(tile, selected ? COLOR_ACCENT : lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(tile, selected ? LV_OPA_30 : LV_OPA_10, 0);
+        lv_obj_set_style_border_width(tile, selected ? 2 : 1, 0);
+        lv_obj_set_style_border_color(tile, selected ? COLOR_ACCENT : lv_color_white(), 0);
+        lv_obj_set_style_border_opa(tile, selected ? LV_OPA_COVER : LV_OPA_20, 0);
+        lv_obj_set_style_pad_all(tile, 0, 0);
+        lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(tile, slot_picker_pick_cb, LV_EVENT_CLICKED,
+                            (void *) (intptr_t) id);
+
+        widget_icon(tile, (glass_widget_t) id, 14, (tile_h - 24) / 2);
+        lv_obj_t *name = glass_label(tile, k_widget_names[id], &lv_font_montserrat_14,
+                                     LV_OPA_COVER);
+        lv_obj_set_width(name, tile_w - 58);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_obj_align(name, LV_ALIGN_LEFT_MID, 50, 0);
     }
 
-    const lv_font_t *vf = (c->id == GLASS_WIDGET_POOL) ? &lv_font_montserrat_22 : &lv_font_montserrat_36;
-    c->value = glass_label(card, "--", vf, LV_OPA_COVER);
-    lv_obj_set_width(c->value, 340);
-    lv_label_set_long_mode(c->value, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_align(c->value, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_align(c->value, LV_ALIGN_RIGHT_MID, -26, 0);
+    lv_obj_move_foreground(s_slot_picker);
+    glass_screen_ready(s_screen);
+}
+
+static void home_card_clicked_cb(lv_event_t *e)
+{
+    int slot = (int) (intptr_t) lv_event_get_user_data(e);
+    slot_picker_open(slot);
+}
+
+static void home_card_enable_picker(card_t *c, int slot)
+{
+    lv_obj_add_flag(c->card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(c->card, home_card_clicked_cb, LV_EVENT_CLICKED,
+                        (void *) (intptr_t) slot);
 }
 
 static void build_grid(void)
@@ -1401,40 +1549,28 @@ static void build_grid(void)
     lv_obj_set_style_pad_column(s_grid, GAP, 0);
     lv_obj_set_flex_flow(s_grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(s_grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_scroll_dir(s_grid, LV_DIR_VER);
-    /* A thin indicator while scrolling: the only cue of position in a
-     * surface that can be three screens tall. */
-    lv_obj_set_scrollbar_mode(s_grid, LV_SCROLLBAR_MODE_ACTIVE);
-    lv_obj_set_style_bg_color(s_grid, lv_color_white(), LV_PART_SCROLLBAR);
-    lv_obj_set_style_bg_opa(s_grid, LV_OPA_50, LV_PART_SCROLLBAR);
-    lv_obj_set_style_width(s_grid, 4, LV_PART_SCROLLBAR);
-    lv_obj_set_style_radius(s_grid, 2, LV_PART_SCROLLBAR);
-    lv_obj_set_style_pad_right(s_grid, 6, LV_PART_SCROLLBAR);
-    glass_track_scroll(s_grid);
-    glass_attach_drawer_toggle(s_grid);
-    /* Keep the drawer above the grid whatever order things were built in. */
+    lv_obj_clear_flag(s_grid, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(s_grid, LV_SCROLLBAR_MODE_OFF);
+    /* The bottom settings affordance was created with the screen; keep it
+     * above the fixed cards whatever order the wallpaper and grid arrived. */
     lv_obj_move_background(s_grid);
     if (s_host_wall) lv_obj_move_background(s_host_wall);
 
-    for (int n = 0; n < GLASS_WIDGET_COUNT; n++) {
+    /* One hero and four twin cards fill 800x480 without scrolling. The first
+     * five entries of the existing unique order blob are the five slots, so
+     * choosing a replacement can be a durable swap rather than a new schema. */
+    for (int n = 0; n < HOME_SLOT_COUNT; n++) {
         int id = s_order[n];
-        if (!(s_mask & (1u << id))) continue;
         card_t *c = &s_cards[s_card_count++];
         c->id = (glass_widget_t) id;
-        if (id == GLASS_WIDGET_HASHRATE)            build_hero(c);
-        else if (s_layout == GLASS_LAYOUT_TWIN)     build_twin_card(c);
-        else                                        build_single_card(c);
+        if (n == 0) build_hero(c);
+        else        build_twin_card(c);
         card_refresh(c);
+        home_card_enable_picker(c, n);
     }
 
-    if (s_card_count == 0) {
-        lv_obj_t *hint = glass_label(s_grid, "Tap to open the menu and choose widgets", &lv_font_montserrat_18, CAPTION_OPA);
-        lv_obj_set_width(hint, CONTENT_W);
-        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-    }
-
-    if (s_mask & (1u << GLASS_WIDGET_PRICE))   price_ensure_task();
-    if (s_mask & (1u << GLASS_WIDGET_MEMPOOL)) mempool_ensure_task();
+    if (home_slots_contain(GLASS_WIDGET_PRICE))   price_ensure_task();
+    if (home_slots_contain(GLASS_WIDGET_MEMPOOL)) mempool_ensure_task();
 
     glass_screen_ready(s_screen);
 }
@@ -1462,16 +1598,17 @@ typedef struct {
 } nav_fns_t;
 
 static const nav_fns_t k_nav[GLASS_SCREEN_COUNT] = {
-    { home_screen_create,     home_get_screen,     home_screen_destroy     },
-    { block_screen_create,    block_get_screen,    block_screen_destroy    },
-    { mempool_screen_create,  mempool_get_screen,  mempool_screen_destroy  },
-    { clock_screen_create,    clock_get_screen,    clock_screen_destroy    },
-    { price_screen_create,    price_get_screen,    price_screen_destroy    },
-    { wifi_screen_create,     wifi_get_screen,     wifi_screen_destroy     },
-    { settings_screen_create, settings_get_screen, settings_screen_destroy },
-    { night_screen_create,    night_get_screen,    night_screen_destroy    },
-    { odds_screen_create,     odds_get_screen,     odds_screen_destroy     },
-    { payout_screen_create,   payout_get_screen,   payout_screen_destroy   },
+    [GLASS_SCREEN_HOME]     = { home_screen_create,     home_get_screen,     home_screen_destroy     },
+    [GLASS_SCREEN_BLOCK]    = { block_screen_create,    block_get_screen,    block_screen_destroy    },
+    [GLASS_SCREEN_MEMPOOL]  = { mempool_screen_create,  mempool_get_screen,  mempool_screen_destroy  },
+    [GLASS_SCREEN_CLOCK]    = { clock_screen_create,    clock_get_screen,    clock_screen_destroy    },
+    [GLASS_SCREEN_PRICE]    = { price_screen_create,    price_get_screen,    price_screen_destroy    },
+    [GLASS_SCREEN_WIFI]     = { wifi_screen_create,     wifi_get_screen,     wifi_screen_destroy     },
+    [GLASS_SCREEN_SETTINGS] = { settings_screen_create, settings_get_screen, settings_screen_destroy },
+    [GLASS_SCREEN_NIGHT]    = { night_screen_create,    night_get_screen,    night_screen_destroy    },
+    [GLASS_SCREEN_ODDS]     = { odds_screen_create,     odds_get_screen,     odds_screen_destroy     },
+    [GLASS_SCREEN_PAYOUT]   = { payout_screen_create,   payout_get_screen,   payout_screen_destroy   },
+    [GLASS_SCREEN_FEED]     = { feed_screen_create,     feed_get_screen,     feed_screen_destroy     },
 };
 
 /* Same order as every classic handler: build the next screen, load it, then
@@ -1541,6 +1678,8 @@ void glass_goto(glass_screen_t target) { glass_navigate(target); }
 static void glass_navigate(glass_screen_t target)
 {
     if (target < 0 || target >= GLASS_SCREEN_COUNT) return;
+    if (target == GLASS_SCREEN_SETTINGS) settings_glass_show_hub();
+    if (s_slot_picker) slot_picker_close();
     if (target == s_host_kind) { glass_drawer_close(); return; }
 
     /* Leave cached screens fully rendered even if navigation lands during the
@@ -1591,20 +1730,27 @@ static void drawer_toggle_cb(lv_event_t *e)
 static void drawer_grabber_cb(lv_event_t *e)
 {
     static uint32_t gesture_at = 0;
+    static bool gesture_release_pending = false;
     if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
         lv_indev_t *indev = lv_indev_get_act();
         if (!indev || lv_indev_get_gesture_dir(indev) != LV_DIR_TOP) return;
         gesture_at = lv_tick_get();
-        if (!s_drawer_open) glass_drawer_open();
+        gesture_release_pending = true;
+        glass_navigate(s_host_kind == GLASS_SCREEN_SETTINGS
+                           ? GLASS_SCREEN_HOME : GLASS_SCREEN_SETTINGS);
         return;
     }
-    if (lv_tick_elaps(gesture_at) < 300U) return; /* release after the swipe */
-    drawer_toggle_cb(e);
+    if (gesture_release_pending) {
+        gesture_release_pending = false;
+        if (lv_tick_elaps(gesture_at) < 300U) return; /* release after the swipe */
+    }
+    glass_navigate(s_host_kind == GLASS_SCREEN_SETTINGS
+                       ? GLASS_SCREEN_HOME : GLASS_SCREEN_SETTINGS);
 }
 
 void glass_attach_drawer_toggle(lv_obj_t *obj)
 {
-    lv_obj_add_event_cb(obj, drawer_toggle_cb, LV_EVENT_CLICKED, NULL);
+    (void) obj;
 }
 
 void glass_set_tap_interceptor(bool (*cb)(void))
@@ -2355,7 +2501,6 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_add_event_cb(scr, drawer_toggle_cb, LV_EVENT_CLICKED, NULL);
 
     s_host      = scr;
     s_host_kind = kind;
@@ -2424,6 +2569,7 @@ void glass_screen_detach(lv_obj_t *scr)
     }
 
     if (!scr) return;
+    if (s_slot_picker_host == scr) slot_picker_close();
     /* Cancels the object-free settle timer before its registry entries are
      * dropped, and restores any panes if a caller detaches before deletion. */
     frost_scroll_finish();
@@ -2449,8 +2595,10 @@ void glass_home_create(void)
     s_refresh = lv_timer_create(refresh_cb, 1000, NULL);
     ESP_LOGI(TAG, "free internal heap after glass home: %u",
              (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    ESP_LOGI(TAG, "glass home: layout=%d widgets=0x%03x wallpaper=%s",
-             (int) s_layout, (unsigned) s_mask, wallpaper_name(s_wall));
+    ESP_LOGI(TAG, "glass home slots: %s / %s / %s / %s / %s; wallpaper=%s",
+             k_widget_names[s_order[0]], k_widget_names[s_order[1]],
+             k_widget_names[s_order[2]], k_widget_names[s_order[3]],
+             k_widget_names[s_order[4]], wallpaper_name(s_wall));
 }
 
 void glass_home_destroy(void)

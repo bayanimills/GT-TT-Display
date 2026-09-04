@@ -5,7 +5,6 @@
 #include "display_schedule.h"
 #include "custom_fonts.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "lvgl.h"
 #include "lwip/apps/sntp.h"
 #include "nvs.h"
@@ -17,10 +16,12 @@
 #define DISPLAY_NVS_ENABLED_KEY "disp_sched"
 #define DISPLAY_NVS_OFF_KEY "disp_off"
 #define DISPLAY_NVS_ON_KEY "disp_on"
+#define DISPLAY_NVS_DIM_KEY "disp_dim"
 #define DISPLAY_NVS_CORNER_KEY "disp_corner"
 #define DISPLAY_NVS_VISUALS_KEY "disp_icon"
 #define DISPLAY_DEFAULT_OFF_MINUTE (22U * 60U)
 #define DISPLAY_DEFAULT_ON_MINUTE (7U * 60U)
+#define DISPLAY_DEFAULT_DIM_PERCENT 20U
 #define DISPLAY_CONTENT_HORIZONTAL_MARGIN 30
 #define DISPLAY_CONTENT_TOP 16
 #define DISPLAY_CONTENT_SAFE_INSET 8
@@ -31,7 +32,6 @@
 #define DISPLAY_POWER_BUTTON_VERTICAL_INSET \
     (DISPLAY_CONTENT_TOP + DISPLAY_CONTENT_SAFE_INSET + DISPLAY_POWER_BUTTON_HIT_PADDING)
 #define DISPLAY_TIMER_PERIOD_MS 30000U
-#define DISPLAY_WAKE_OVERRIDE_US (10LL * 60LL * 1000LL * 1000LL)
 #define VALID_TIME_EPOCH 1672531200
 
 static const char *TAG = "display_control";
@@ -40,6 +40,7 @@ static display_control_config_t current_config = {
     .schedule_enabled = false,
     .off_minute = DISPLAY_DEFAULT_OFF_MINUTE,
     .on_minute = DISPLAY_DEFAULT_ON_MINUTE,
+    .dim_percent = DISPLAY_DEFAULT_DIM_PERCENT,
     .power_button_corner = DISPLAY_POWER_BUTTON_TOP_RIGHT,
     .power_button_visuals_visible = true,
 };
@@ -49,8 +50,9 @@ static bool backlight_on = true;
 static bool manual_off = false;
 static bool schedule_state_known = false;
 static bool last_schedule_off = false;
+static bool schedule_dim_active = false;
+static uint8_t normal_brightness = 100U;
 static bool sntp_started = false;
-static int64_t wake_override_until_us = 0;
 static lv_timer_t *schedule_timer = NULL;
 static lv_obj_t *power_button = NULL;
 static lv_obj_t *power_icon_parts[3] = { NULL, NULL, NULL };
@@ -67,6 +69,7 @@ static void display_control_apply_skin(void);
 static void display_control_load_config(void);
 static esp_err_t display_control_save_config(void);
 static void display_control_set_backlight(bool enabled);
+static void display_control_apply_brightness(void);
 static void display_control_start_sntp_if_ready(void);
 static void display_control_timer_cb(lv_timer_t *timer);
 static void display_control_power_clicked(lv_event_t *event);
@@ -78,6 +81,10 @@ esp_err_t display_control_init(void)
     }
 
     display_control_load_config();
+    uint8_t detected_brightness = lcd_backlight_get_brightness();
+    if (detected_brightness >= 5U && detected_brightness <= 100U) {
+        normal_brightness = detected_brightness;
+    }
     initialized = true;
     backlight_on = true;
     schedule_timer = lv_timer_create(display_control_timer_cb, DISPLAY_TIMER_PERIOD_MS, NULL);
@@ -153,13 +160,14 @@ void display_control_get_config(display_control_config_t *config)
 esp_err_t display_control_set_config(const display_control_config_t *config)
 {
     if (!config || config->off_minute >= 1440U || config->on_minute >= 1440U ||
+        config->dim_percent < 5U || config->dim_percent > 100U ||
         config->power_button_corner > DISPLAY_POWER_BUTTON_TOP_LEFT) {
         return ESP_ERR_INVALID_ARG;
     }
 
     current_config = *config;
+    if (!current_config.schedule_enabled) schedule_dim_active = false;
     schedule_state_known = false;
-    wake_override_until_us = 0;
     display_control_position_power_button();
     display_control_refresh_power_button_visibility();
 
@@ -178,6 +186,19 @@ bool display_control_is_backlight_on(void)
     return backlight_on;
 }
 
+bool display_control_is_dimmed(void)
+{
+    return schedule_dim_active && backlight_on;
+}
+
+void display_control_set_brightness(uint8_t percent)
+{
+    if (percent < 5U) percent = 5U;
+    if (percent > 100U) percent = 100U;
+    normal_brightness = percent;
+    display_control_apply_brightness();
+}
+
 bool display_control_handle_touch_wake(void)
 {
     if (backlight_on) {
@@ -185,18 +206,6 @@ bool display_control_handle_touch_wake(void)
     }
 
     manual_off = false;
-
-    uint16_t minute_of_day;
-    if (display_control_get_local_minute(&minute_of_day) &&
-        display_schedule_should_be_off(current_config.schedule_enabled,
-                                       minute_of_day,
-                                       current_config.off_minute,
-                                       current_config.on_minute)) {
-        wake_override_until_us = esp_timer_get_time() + DISPLAY_WAKE_OVERRIDE_US;
-    } else {
-        wake_override_until_us = 0;
-    }
-
     display_control_set_backlight(true);
     return true;
 }
@@ -218,7 +227,6 @@ bool display_control_filter_touch(bool pressed)
 void display_control_turn_off(void)
 {
     manual_off = true;
-    wake_override_until_us = 0;
     display_control_set_backlight(false);
 }
 
@@ -236,6 +244,7 @@ static void display_control_load_config(void)
     uint8_t show_visuals = 1U;
     uint16_t off_minute = DISPLAY_DEFAULT_OFF_MINUTE;
     uint16_t on_minute = DISPLAY_DEFAULT_ON_MINUTE;
+    uint8_t dim_percent = DISPLAY_DEFAULT_DIM_PERCENT;
     bool legacy_hidden = false;
 
     if (nvs_get_u8(handle, DISPLAY_NVS_ENABLED_KEY, &enabled) == ESP_OK) {
@@ -246,6 +255,10 @@ static void display_control_load_config(void)
     }
     if (nvs_get_u16(handle, DISPLAY_NVS_ON_KEY, &on_minute) == ESP_OK && on_minute < 1440U) {
         current_config.on_minute = on_minute;
+    }
+    if (nvs_get_u8(handle, DISPLAY_NVS_DIM_KEY, &dim_percent) == ESP_OK &&
+        dim_percent >= 5U && dim_percent <= 100U) {
+        current_config.dim_percent = dim_percent;
     }
     if (nvs_get_u8(handle, DISPLAY_NVS_CORNER_KEY, &corner) == ESP_OK) {
         if (corner <= DISPLAY_POWER_BUTTON_TOP_LEFT) {
@@ -279,6 +292,9 @@ static esp_err_t display_control_save_config(void)
     }
     if (err == ESP_OK) {
         err = nvs_set_u16(handle, DISPLAY_NVS_ON_KEY, current_config.on_minute);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(handle, DISPLAY_NVS_DIM_KEY, current_config.dim_percent);
     }
     if (err == ESP_OK) {
         err = nvs_set_u8(handle, DISPLAY_NVS_CORNER_KEY, (uint8_t)current_config.power_button_corner);
@@ -399,15 +415,28 @@ static void display_control_create_display_off_icon(lv_obj_t *parent)
 static void display_control_set_backlight(bool enabled)
 {
     if (backlight_on == enabled) {
+        if (enabled) display_control_apply_brightness();
         return;
     }
 
     esp_err_t err = enabled ? lcd_backlight_enable() : lcd_backlight_disable();
     if (err == ESP_OK) {
         backlight_on = enabled;
+        if (enabled) display_control_apply_brightness();
         ESP_LOGI(TAG, "Backlight %s", enabled ? "on" : "off");
     } else {
         ESP_LOGE(TAG, "Failed to turn backlight %s: %s", enabled ? "on" : "off", esp_err_to_name(err));
+    }
+}
+
+static void display_control_apply_brightness(void)
+{
+    if (!backlight_on) return;
+    uint8_t target = schedule_dim_active ? current_config.dim_percent : normal_brightness;
+    if (target > normal_brightness) target = normal_brightness;
+    esp_err_t err = lcd_backlight_fade_to(target, 240U);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set scheduled brightness: %s", esp_err_to_name(err));
     }
 }
 
@@ -454,46 +483,18 @@ static void display_control_evaluate(void)
                                                        minute_of_day,
                                                        current_config.off_minute,
                                                        current_config.on_minute);
-    bool transitioned_on = schedule_state_known && last_schedule_off && !schedule_off;
-    bool transitioned_off = schedule_state_known && !last_schedule_off && schedule_off;
-
-    if (!schedule_state_known && schedule_off) {
-        transitioned_off = true;
-    }
+    bool brightness_changed = !schedule_state_known || last_schedule_off != schedule_off;
 
     schedule_state_known = true;
     last_schedule_off = schedule_off;
-
-    if (transitioned_on) {
-        manual_off = false;
-        wake_override_until_us = 0;
-        display_control_set_backlight(true);
-        return;
-    }
-
-    if (transitioned_off) {
-        manual_off = false;
-        wake_override_until_us = 0;
-        display_control_set_backlight(false);
-        return;
-    }
+    schedule_dim_active = schedule_off;
 
     if (manual_off) {
         display_control_set_backlight(false);
         return;
     }
-
-    if (schedule_off) {
-        if (wake_override_until_us > esp_timer_get_time()) {
-            display_control_set_backlight(true);
-        } else {
-            wake_override_until_us = 0;
-            display_control_set_backlight(false);
-        }
-    } else {
-        wake_override_until_us = 0;
-        display_control_set_backlight(true);
-    }
+    display_control_set_backlight(true);
+    if (brightness_changed) display_control_apply_brightness();
 }
 
 static void display_control_timer_cb(lv_timer_t *timer)

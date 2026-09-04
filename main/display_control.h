@@ -10,6 +10,7 @@ typedef struct {
     bool schedule_enabled;
     uint16_t off_minute;
     uint16_t on_minute;
+    uint8_t dim_percent;
     display_power_button_corner_t power_button_corner;
     bool power_button_visuals_visible;
 } display_control_config_t;
@@ -32,6 +33,8 @@ void display_control_set_power_button_dim(bool dim);
 void display_control_get_config(display_control_config_t *config);
 esp_err_t display_control_set_config(const display_control_config_t *config);
 bool display_control_is_backlight_on(void);
+bool display_control_is_dimmed(void);
+void display_control_set_brightness(uint8_t percent);
 bool display_control_handle_touch_wake(void);
 
 /* Feed every raw touch sample through here from the indev read callback and
@@ -45,4 +48,3 @@ void display_control_turn_off(void);/* False until the clock has been set, whic
  * answered. The schedule cannot be judged before then, so anything that
  * offers it has to say so rather than appearing to do nothing. */
 bool display_control_time_is_set(void);
-

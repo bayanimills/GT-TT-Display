@@ -12,7 +12,7 @@
  *           P <index>         select theme preset
  *           S <slot> <rrggbb> override one theme slot
  *           C                 commit theme (persist + repaint)
- *           N <screen>        navigate: home night block clock price mempool wifi settings
+ *           N <screen>        navigate: home block clock price mempool odds feed wifi settings
  *           K <skin>          select skin (0 classic, 1 glass); home rebuilds on next N home
  *           G <what> <val>    glass: layout 0|1, widgets <hex>, wall <i>, drawer 0|1, sheet 0..5
  *           D off | D mode <0..3>   display off / display-off button mode
@@ -50,6 +50,7 @@
 #include "settings.h"
 #include "odds.h"
 #include "payout.h"
+#include "feed.h"
 #include "blockfound.h"
 #include "ota_screen.h"
 void sim_ota_fake_available(bool on);
@@ -149,6 +150,7 @@ static const sim_screen_t k_screens[] = {
     { "settings", settings_screen_create, settings_screen_destroy, settings_get_screen, GLASS_SCREEN_SETTINGS },
     { "odds", odds_screen_create, odds_screen_destroy, odds_get_screen, GLASS_SCREEN_ODDS },
     { "payout", payout_screen_create, payout_screen_destroy, payout_get_screen, GLASS_SCREEN_PAYOUT },
+    { "feed", feed_screen_create, feed_screen_destroy, feed_get_screen, GLASS_SCREEN_FEED },
 };
 #define SCREEN_COUNT ((int) (sizeof(k_screens) / sizeof(k_screens[0])))
 
@@ -533,6 +535,10 @@ int main(void)
     /* Boot exactly like the device does. */
     settings_initialize();
     chain_init();
+    feed_post(FEED_KIND_MINER, "Miner online", "Telemetry is flowing normally.");
+    feed_post(FEED_KIND_POOL, "Pool connected", "Stratum connection is healthy.");
+    feed_post(FEED_KIND_NETWORK, "New block", "The Bitcoin chain advanced one block.");
+    feed_post(FEED_KIND_SYSTEM, "Display ready", "Glass UI is ready for review.");
 
     poolping_start();
     if (lvgl_port_lock(-1)) {

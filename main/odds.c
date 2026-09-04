@@ -236,21 +236,21 @@ void odds_screen_create(void)
     }
 
     lv_obj_t *title = lv_label_create(parent);
-    lv_label_set_text(title, "SOLO ODDS");
+    lv_label_set_text(title, "SOLO MINING ODDS");
     lv_obj_set_style_text_color(title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 14);
     if (glass) glass_pill_label(title, false);
 
     odds_subtitle_label = lv_label_create(parent);
     lv_label_set_text(odds_subtitle_label, "waiting for miner");
     lv_obj_set_style_text_color(odds_subtitle_label, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(odds_subtitle_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(odds_subtitle_label, LV_ALIGN_TOP_MID, 0, 46);
+    lv_obj_set_style_text_font(odds_subtitle_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(odds_subtitle_label, LV_ALIGN_TOP_MID, 0, 45);
     if (glass) glass_pill_label(odds_subtitle_label, false);
 
     /* Hero: the one number the screen exists for. */
-    const int hero_w = 740;
+    const int hero_w = 744;
     const int hero_h = 150;
     lv_obj_t *hero;
     if (glass)
@@ -270,7 +270,7 @@ void odds_screen_create(void)
         lv_obj_clear_flag(hero, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_scrollbar_mode(hero, LV_SCROLLBAR_MODE_OFF);
     }
-    lv_obj_align(hero, LV_ALIGN_TOP_MID, 0, 78);
+    lv_obj_align(hero, LV_ALIGN_TOP_MID, 0, 76);
 
     odds_hero_label = lv_label_create(hero);
     lv_label_set_text(odds_hero_label, "1 in --");
@@ -285,10 +285,10 @@ void odds_screen_create(void)
     lv_obj_align(odds_hero_caption, LV_ALIGN_CENTER, 0, 34);
 
     const int card_w = 240;
-    const int card_h = 128;
+    const int card_h = 142;
     const int gap    = 10;
     const int row_x  = (SCREEN_WIDTH - (card_w * 3 + gap * 2)) / 2;
-    const int row_y  = 250;
+    const int row_y  = 242;
 
     odds_build_stat(parent, 0, "EXPECTED WAIT",     row_x,                       row_y, card_w, card_h, glass);
     odds_build_stat(parent, 1, "NETWORK DIFFICULTY", row_x + card_w + gap,        row_y, card_w, card_h, glass);

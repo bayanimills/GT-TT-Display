@@ -11,23 +11,26 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font-size: 13px; }
+  body { margin: 0; min-width: 0; background: var(--bg); color: var(--fg); font-size: 13px; }
   header {
     display: flex; align-items: baseline; gap: 14px;
-    padding: 10px 16px; border-bottom: 1px solid var(--line);
+    padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap;
   }
   header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: .04em; }
   header .meta { color: var(--dim); font-size: 12px; }
   .wrap { display: flex; gap: 16px; padding: 16px; align-items: flex-start; flex-wrap: wrap; }
 
-  .screen { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #000; }
+  .screen {
+    width: min(822px, 100%); min-width: 0; flex: 0 1 822px;
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #000;
+  }
   canvas {
-    display: block; width: 800px; height: 480px; cursor: crosshair;
+    display: block; width: 100%; height: auto; aspect-ratio: 5 / 3; cursor: crosshair;
     image-rendering: pixelated; touch-action: none;
   }
   .screen .bar { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; padding-top: 8px; }
 
-  aside { width: 340px; display: flex; flex-direction: column; gap: 14px; }
+  aside { width: min(340px, 100%); max-width: 340px; flex: 1 1 300px; display: flex; flex-direction: column; gap: 14px; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
   section h2 { margin: 0 0 9px; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); font-weight: 600; }
 
@@ -39,6 +42,9 @@
   }
   button:hover { border-color: #3a4552; background: #212832; }
   button.on { border-color: var(--accent); color: #fff; }
+  button:focus-visible, input:focus-visible, canvas:focus-visible {
+    outline: 3px solid #70b7ff; outline-offset: 2px;
+  }
 
   .slot { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
   .slot label { flex: 1; color: var(--dim); font-size: 12px; }
@@ -58,6 +64,17 @@
     color: var(--dim); white-space: pre-wrap; word-break: break-word;
   }
   .hint { color: var(--dim); font-size: 11px; margin-top: 7px; line-height: 1.5; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  @media (max-width: 700px) {
+    .wrap { padding: 8px; gap: 10px; }
+    .screen { padding: 6px; }
+    aside { width: 100%; max-width: none; }
+    button { min-height: 44px; }
+    header .meta { flex-basis: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -67,12 +84,15 @@
   <span class="meta">800&times;480 &middot; ST7262 &middot; GT911 &middot; real <code>main/</code> code, host LVGL</span>
 </header>
 
-<div class="wrap">
+<main class="wrap">
   <div class="screen">
-    <canvas id="screen" width="800" height="480"></canvas>
+    <canvas id="screen" width="800" height="480" role="img"
+            aria-label="Live 800 by 480 Turbo Touch display. Use the Screen controls to choose a view; pointer input operates the rendered touch interface.">
+      Live Turbo Touch simulator display.
+    </canvas>
     <div class="bar">
       <span id="stat">connecting…</span>
-      <span id="live">live: —</span>
+      <span id="live" role="status" aria-live="polite" aria-atomic="true">live: —</span>
     </div>
   </div>
 
@@ -97,35 +117,37 @@
     <section>
       <h2>Skin</h2>
       <div class="grid">
-        <button onclick="cmd('K 0')">Classic</button>
-        <button onclick="cmd('K 1')">Glass</button>
+        <button onclick="selectSkin(this, 0)" aria-pressed="false">Classic</button>
+        <button onclick="selectSkin(this, 1)" aria-pressed="false">Glass</button>
       </div>
-      <div class="hint">Glass only: tap the canvas for the drawer, or drive it directly.</div>
+      <div class="hint">Glass only: tap the bottom bar for Settings, or drive a page directly.</div>
       <div class="grid three" style="margin-top:6px">
         <button onclick="cmd('G layout 0')">Single col</button>
         <button onclick="cmd('G layout 1')">Twin col</button>
-        <button onclick="cmd('G drawer 1')">Drawer</button>
+        <button onclick="cmd('N settings')">Settings</button>
         <button onclick="cmd('G wall 0')">Aurora</button>
         <button onclick="cmd('G wall 1')">Sunset</button>
         <button onclick="cmd('G wall 2')">Graphite</button>
-        <button onclick="cmd('G sheet 1')">Widgets</button>
+        <button onclick="cmd('G sheet 1')">Home slots</button>
         <button onclick="cmd('G sheet 2')">Layout</button>
-        <button onclick="cmd('G sheet 3')">Wallpaper</button>
+        <button onclick="cmd('G sheet 3')">Style tools</button>
       </div>
     </section>
 
     <section>
       <h2>Data</h2>
       <div class="row" style="margin-bottom:6px">
-        <input type="text" id="host" placeholder="192.168.1.50">
-        <button id="liveBtn">Mirror</button>
+        <label class="sr-only" for="host">Bitaxe host or IP address</label>
+        <input type="text" id="host" placeholder="192.168.1.50" autocomplete="off">
+        <button id="liveBtn" aria-pressed="false">Mirror</button>
       </div>
       <div class="grid">
         <button id="demoBtn">Demo values</button>
         <button id="repaintBtn">Repaint</button>
       </div>
       <div class="row" style="margin-top:6px">
-        <input type="text" id="bap" placeholder="$BAP,RES,hashrate,2450.0*XX">
+        <label class="sr-only" for="bap">Raw BAP sentence</label>
+        <input type="text" id="bap" placeholder="$BAP,RES,hashrate,2450.0*XX" autocomplete="off">
         <button id="bapBtn">Send</button>
       </div>
       <div class="hint">Mirror polls the Bitaxe's HTTP API and replays it as BAP sentences. Nothing is written to the miner.</div>
@@ -133,10 +155,10 @@
 
     <section>
       <h2>Sim log</h2>
-      <pre id="log"></pre>
+      <pre id="log" aria-label="Simulator log"></pre>
     </section>
   </aside>
-</div>
+</main>
 
 <script>
 const cv  = document.getElementById('screen');
@@ -316,10 +338,15 @@ function buildPresets(names) {
     const b = document.createElement('button');
     b.textContent = n;
     b.className = i === presetIdx ? 'on' : '';
+    b.setAttribute('aria-pressed', i === presetIdx ? 'true' : 'false');
     b.onclick = () => {
       presetIdx = i;
       cmd('P ' + i);
-      [...box.children].forEach((c, j) => c.className = j === i ? 'on' : '');
+      [...box.children].forEach((c, j) => {
+        const selected = j === i;
+        c.className = selected ? 'on' : '';
+        c.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      });
     };
     box.appendChild(b);
   });
@@ -359,8 +386,10 @@ function buildSlots(names) {
     const row = document.createElement('div');
     row.className = 'slot';
     const lab = document.createElement('label'); lab.textContent = n;
-    const inp = document.createElement('input'); inp.type = 'color'; inp.value = '#000000';
-    const hex = document.createElement('code'); hex.textContent = '';
+    const inp = document.createElement('input');
+    inp.type = 'color'; inp.value = '#000000'; inp.id = 'palette-' + i;
+    lab.htmlFor = inp.id;
+    const hex = document.createElement('code'); hex.textContent = ''; hex.setAttribute('aria-hidden', 'true');
     inp.oninput = () => {
       hex.textContent = inp.value.toUpperCase();
       queuePalette(i, inp.value.slice(1));
@@ -376,9 +405,26 @@ function buildScreens(names) {
   names.forEach(n => {
     const b = document.createElement('button');
     b.textContent = n;
-    b.onclick = () => cmd('N ' + n);
+    b.setAttribute('aria-pressed', 'false');
+    b.onclick = () => {
+      cmd('N ' + n);
+      [...box.children].forEach(c => {
+        const selected = c === b;
+        c.className = selected ? 'on' : '';
+        c.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      });
+    };
     box.appendChild(b);
   });
+}
+
+function selectSkin(button, index) {
+  [...button.parentElement.children].forEach(b => {
+    const selected = b === button;
+    b.className = selected ? 'on' : '';
+    b.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  });
+  cmd('K ' + index);
 }
 
 document.getElementById('demoBtn').onclick     = () => post('/demo');
@@ -394,6 +440,7 @@ document.getElementById('bap').addEventListener('keydown', e => {
 let liveOn = false;
 document.getElementById('liveBtn').onclick = () => {
   liveOn = !liveOn;
+  document.getElementById('liveBtn').setAttribute('aria-pressed', liveOn ? 'true' : 'false');
   post('/live', JSON.stringify({ host: document.getElementById('host').value, on: liveOn }));
 };
 
@@ -411,6 +458,7 @@ async function poll() {
       }
       document.getElementById('live').textContent = 'live: ' + s.live;
       document.getElementById('liveBtn').className = liveOn ? 'on' : '';
+      document.getElementById('liveBtn').setAttribute('aria-pressed', liveOn ? 'true' : 'false');
       const log = document.getElementById('log');
       const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
       log.textContent = s.log.join('\n');

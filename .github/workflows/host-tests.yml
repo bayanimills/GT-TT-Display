@@ -29,6 +29,9 @@ jobs:
           cc -std=c11 -Wall -Wextra -Werror -Imain \
             tests/test_ota_release.c main/ota_release.c -o /tmp/ota_release
           /tmp/ota_release
+          cc -std=c11 -Wall -Wextra -Werror -Imain \
+            -Icomponents/lvgl__lvgl tests/test_feed_web.c main/feed_web.c -o /tmp/feed_web
+          /tmp/feed_web
           bash tests/test_settings_ui_contract.sh
       - name: Syntax-check hardware-only updater
         working-directory: sim

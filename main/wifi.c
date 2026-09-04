@@ -59,6 +59,9 @@ typedef enum {
 
 static wifi_connection_state_t wifi_connection_state = WIFI_CONNECTION_STATE_DISCONNECTED;
 static int64_t wifi_connect_deadline_us = 0;
+/* This panel's own STA address. Keep it separate from current_wifi_info's IP,
+ * which is intentionally the AxeOS/miner address received over BAP. */
+static char display_ip_address[16] = "";
 
 static wifi_info_t current_wifi_info = {
     .ssid = "MyNetwork",
@@ -303,6 +306,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     }
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        display_ip_address[0] = '\0';
         if (wifi_connect_pending) {
             wifi_set_connection_state(WIFI_CONNECTION_STATE_CONNECTING);
             esp_wifi_connect();
@@ -316,6 +320,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
     if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+        snprintf(display_ip_address, sizeof(display_ip_address), IPSTR,
+                 IP2STR(&event->ip_info.ip));
         // Don't update IP address here - use BAP-provided IP instead
         // snprintf(current_wifi_info.ip_address, sizeof(current_wifi_info.ip_address), IPSTR, IP2STR(&event->ip_info.ip));
         LV_UNUSED(event);
@@ -948,6 +954,11 @@ bool wifi_is_connected(void)
 const char *wifi_get_current_ip(void)
 {
     return current_wifi_info.ip_address;
+}
+
+const char *wifi_get_display_ip(void)
+{
+    return display_ip_address;
 }
 
 lv_obj_t* wifi_get_screen(void)

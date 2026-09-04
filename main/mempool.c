@@ -38,8 +38,9 @@
 #define MEMPOOL_MAX_BLOCKS 8
 #define MEMPOOL_FETCH_INTERVAL_MS 60000
 
-#define CARD_W 210
-#define CARD_H 210
+#define MEMPOOL_VISIBLE_BLOCKS 3
+#define CARD_W 240
+#define CARD_H 218
 
 /* Path only: the host comes from the data source setting, and both providers
  * serve this route with the same response shape. */
@@ -91,7 +92,6 @@ static void mempool_refresh_fees(void);
 
 static bool json_get_ll(const char *obj, const char *key, long long *out);
 static bool json_get_double(const char *obj, const char *key, double *out);
-static void format_fee_value(double v, char *buf, size_t buf_size);
 static void format_btc_from_sats(long long sats, char *buf, size_t buf_size);
 static int split_top_level_objects(const char *json, int len, int starts[], int ends[], int max_items);
 static bool parse_fee_range(const char *obj, double *out_min, double *out_max);
@@ -148,10 +148,10 @@ void mempool_screen_create(void)
     }
 
     lv_obj_t *title = lv_label_create(mempool_screen);
-    lv_label_set_text(title, "LATEST BLOCKS");
+    lv_label_set_text(title, "NETWORK FEES");
     lv_obj_set_style_text_color(title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 14);
     if (glass) glass_pill_label(title, false);
 
     mempool_status_label = lv_label_create(mempool_screen);
@@ -159,40 +159,42 @@ void mempool_screen_create(void)
     lv_obj_set_style_text_color(mempool_status_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_opa(mempool_status_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(mempool_status_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(mempool_status_label, LV_ALIGN_TOP_MID, 0, 48);
+    lv_obj_align(mempool_status_label, LV_ALIGN_TOP_MID, 0, 44);
     if (glass) glass_pill_label(mempool_status_label, false);
 
     mempool_build_fee_strip(mempool_screen, glass);
 
+    lv_obj_t *recent_title = lv_label_create(mempool_screen);
+    lv_label_set_text(recent_title, "RECENT BLOCKS");
+    lv_obj_set_style_text_color(recent_title, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(recent_title, &lv_font_montserrat_14, 0);
+    lv_obj_align(recent_title, LV_ALIGN_TOP_MID, 0, 146);
+    if (glass) glass_pill_label(recent_title, false);
+
     mempool_row = lv_obj_create(mempool_screen);
-    const int row_y = 130;
-    const int nav_h = glass ? 0 : 64;
-    const int row_bottom_gap = 16;
-    int row_h = SCREEN_HEIGHT - row_y - nav_h - row_bottom_gap;
-    if (row_h < 250)
-    {
-        row_h = 250;
-    }
-    lv_obj_set_size(mempool_row, SCREEN_WIDTH, row_h);
+    const int row_y = 168;
+    const int row_h = CARD_H;
+    lv_obj_set_size(mempool_row, 740, row_h);
     lv_obj_align(mempool_row, LV_ALIGN_TOP_MID, 0, row_y);
     lv_obj_set_style_bg_opa(mempool_row, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(mempool_row, 0, 0);
-    lv_obj_set_style_pad_left(mempool_row, 18, 0);
-    lv_obj_set_style_pad_right(mempool_row, 18, 0);
+    lv_obj_set_style_pad_left(mempool_row, 0, 0);
+    lv_obj_set_style_pad_right(mempool_row, 0, 0);
     lv_obj_set_style_pad_top(mempool_row, 0, 0);
     lv_obj_set_style_pad_bottom(mempool_row, 0, 0);
-    lv_obj_set_style_pad_column(mempool_row, 24, 0);
-    lv_obj_set_scroll_dir(mempool_row, LV_DIR_HOR);
-    /* Glass has no chrome, so the row still scrolls but draws no scrollbar. */
-    lv_obj_set_scrollbar_mode(mempool_row, glass ? LV_SCROLLBAR_MODE_OFF : LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_pad_column(mempool_row, 10, 0);
+    lv_obj_set_scroll_dir(mempool_row, LV_DIR_NONE);
+    lv_obj_clear_flag(mempool_row, LV_OBJ_FLAG_SCROLLABLE |
+                                    LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                    LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_set_scrollbar_mode(mempool_row, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_flex_flow(mempool_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(mempool_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     if (glass)
     {
-        /* The row scrolls sideways, so its panes must keep their crops aimed,
-         * and a tap on it (not a drag) should open the drawer. */
-        glass_track_scroll(mempool_row);
+        /* The whole latest-block snapshot fits without a gesture. A tap on the
+         * quiet space still opens the drawer. */
         glass_attach_drawer_toggle(mempool_row);
         mempool_rebuild_cards();
         mempool_ensure_task();
@@ -250,8 +252,8 @@ static void mempool_build_fee_strip(lv_obj_t *host, bool glass)
     const int cell_w = 168;
     const int gap    = 8;
     const int x0     = (SCREEN_WIDTH - (cell_w * 4 + gap * 3)) / 2;
-    const int y      = 70;
-    const int h      = 52;
+    const int y      = 72;
+    const int h      = 64;
 
     for (int i = 0; i < 4; i++)
     {
@@ -279,13 +281,13 @@ static void mempool_build_fee_strip(lv_obj_t *host, bool glass)
         lv_label_set_text(cap, k_band[i]);
         lv_obj_set_style_text_color(cap, COLOR_TEXT_SECONDARY, 0);
         lv_obj_set_style_text_font(cap, &lv_font_montserrat_12, 0);
-        lv_obj_align(cap, LV_ALIGN_TOP_MID, 0, 7);
+        lv_obj_align(cap, LV_ALIGN_TOP_MID, 0, 9);
 
         mempool_fee_value[i] = lv_label_create(cell);
         lv_label_set_text(mempool_fee_value[i], "--");
         lv_obj_set_style_text_color(mempool_fee_value[i], COLOR_TEXT_PRIMARY, 0);
         lv_obj_set_style_text_font(mempool_fee_value[i], &lv_font_montserrat_22, 0);
-        lv_obj_align(mempool_fee_value[i], LV_ALIGN_TOP_MID, 0, 24);
+        lv_obj_align(mempool_fee_value[i], LV_ALIGN_TOP_MID, 0, 31);
     }
 
 
@@ -332,6 +334,14 @@ static void mempool_refresh_fees(void)
         snprintf(buf, sizeof(buf), "%s  -  %s waiting  -  %.1f vMB",
                  chain_source_name(chain_get_source()), n,
                  (double) d->mempool_vsize / 1000000.0);
+        lv_label_set_text(mempool_status_label, buf);
+    }
+    else if (mempool_status_label && mempool_block_count > 0)
+    {
+        snprintf(buf, sizeof(buf), "%s  -  %d RECENT BLOCKS",
+                 chain_source_name(chain_get_source()),
+                 mempool_block_count < MEMPOOL_VISIBLE_BLOCKS
+                    ? mempool_block_count : MEMPOOL_VISIBLE_BLOCKS);
         lv_label_set_text(mempool_status_label, buf);
     }
 }
@@ -673,183 +683,99 @@ static void mempool_rebuild_cards(void)
     }
 
     const bool glass = glass_active();
+    const int shown = mempool_block_count < MEMPOOL_VISIBLE_BLOCKS
+                    ? mempool_block_count : MEMPOOL_VISIBLE_BLOCKS;
 
-    const lv_color_t color_height = lv_color_hex(0x00E5FF);
-    const lv_color_t color_card = lv_color_hex(0x0B1E3A);
-    const lv_color_t color_mid = lv_color_hex(0x1E5BFF);
-    const lv_color_t color_bottom = lv_color_hex(0x7C3BFF);
-    const lv_color_t color_fee = lv_color_hex(0xFFE600);
-    const int row_h = lv_obj_get_height(mempool_row);
-    const int wrap_top_offset = 38;
-    const int wrap_pool_h = 24;
-    const int wrap_bottom_pad = 8;
-    const int wrap_extra = wrap_top_offset + wrap_pool_h + wrap_bottom_pad;
-    int card_h = row_h - wrap_extra;
-    if (card_h > CARD_H)
-    {
-        card_h = CARD_H;
-    }
-    if (card_h < 200)
-    {
-        card_h = 200;
-    }
-
-    for (int i = 0; i < mempool_block_count; i++)
+    for (int i = 0; i < shown; i++)
     {
         mempool_block_t *b = &mempool_blocks[i];
-
-        lv_obj_t *card_wrap = lv_obj_create(mempool_row);
-        lv_obj_set_size(card_wrap, CARD_W, card_h + wrap_extra);
-        lv_obj_set_style_bg_opa(card_wrap, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(card_wrap, 0, 0);
-        lv_obj_set_style_pad_all(card_wrap, 0, 0);
-        lv_obj_clear_flag(card_wrap, LV_OBJ_FLAG_SCROLLABLE);
-        if (glass)
-        {
-            lv_obj_clear_flag(card_wrap, LV_OBJ_FLAG_CLICKABLE);
-        }
-
-        char height_txt[16];
-        lv_snprintf(height_txt, sizeof(height_txt), "%lld", b->height);
-        lv_obj_t *height_label = lv_label_create(card_wrap);
-        lv_label_set_text(height_label, height_txt);
-        lv_obj_set_style_text_color(height_label, color_height, 0);
-        lv_obj_set_style_text_font(height_label, &lv_font_montserrat_24, 0);
-        lv_obj_align(height_label, LV_ALIGN_TOP_MID, 0, 0);
-        if (glass)
-        {
-            /* Sits on the wallpaper, not on the card, so it gets its own pill. */
-            glass_pill_label(height_label, true);
-        }
-
         lv_obj_t *card;
         if (glass)
         {
-            card = glass_pane(card_wrap, CARD_W, card_h, 20);
-            lv_obj_align(card, LV_ALIGN_TOP_MID, 0, wrap_top_offset);
+            /* Recent-block cards are rebuilt after every fetch.  Keep them
+             * out of glass.c's persistent frost registry so lv_obj_clean()
+             * can never leave that registry holding freed LVGL objects. */
+            card = lv_obj_create(mempool_row);
+            lv_obj_set_size(card, CARD_W, CARD_H);
+            lv_obj_set_style_radius(card, 20, 0);
+            lv_obj_set_style_bg_color(card, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(card, LV_OPA_60, 0);
+            lv_obj_set_style_border_color(card, lv_color_white(), 0);
+            lv_obj_set_style_border_opa(card, LV_OPA_40, 0);
+            lv_obj_set_style_border_width(card, 1, 0);
+            lv_obj_set_style_shadow_width(card, 0, 0);
+            lv_obj_set_style_pad_all(card, 0, 0);
+            lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
         }
         else
         {
-            card = lv_obj_create(card_wrap);
-            lv_obj_set_size(card, CARD_W, card_h);
-            lv_obj_align(card, LV_ALIGN_TOP_MID, 0, wrap_top_offset);
-            lv_obj_set_style_radius(card, 8, 0);
-            lv_obj_set_style_border_width(card, 0, 0);
+            card = lv_obj_create(mempool_row);
+            lv_obj_set_size(card, CARD_W, CARD_H);
+            lv_obj_set_style_radius(card, 14, 0);
+            lv_obj_set_style_border_width(card, 1, 0);
+            lv_obj_set_style_border_color(card, COLOR_BORDER, 0);
             lv_obj_set_style_pad_all(card, 0, 0);
-            lv_obj_set_style_bg_color(card, color_card, 0);
+            lv_obj_set_style_bg_color(card, COLOR_CARD_BG, 0);
             lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-            lv_obj_set_style_clip_corner(card, true, 0);
             lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-
-            lv_obj_t *mid = lv_obj_create(card);
-            lv_obj_set_size(mid, CARD_W, card_h);
-            lv_obj_align(mid, LV_ALIGN_TOP_MID, 0, 0);
-            lv_obj_set_style_radius(mid, 8, 0);
-            lv_obj_set_style_bg_color(mid, color_mid, 0);
-            lv_obj_set_style_bg_grad_color(mid, color_bottom, 0);
-            lv_obj_set_style_bg_grad_dir(mid, LV_GRAD_DIR_VER, 0);
-            lv_obj_set_style_bg_opa(mid, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_width(mid, 0, 0);
-            lv_obj_set_style_pad_all(mid, 0, 0);
-            lv_obj_clear_flag(mid, LV_OBJ_FLAG_SCROLLABLE);
         }
 
-        const int bottom_bar_h = 52;
-        int content_h = card_h - bottom_bar_h;
-        if (content_h < 120)
-        {
-            content_h = 120;
-        }
-        const int median_y = 10;
-        const int range_y = median_y + 28;
-        const int btc_y = range_y + 34;
-        int tx_y = btc_y + 44;
-        if (tx_y > content_h - 28)
-        {
-            tx_y = content_h - 28;
-        }
+        char height_txt[24];
+        chain_fmt_grouped((long)b->height, height_txt, sizeof(height_txt));
+        lv_obj_t *height_label = lv_label_create(card);
+        lv_label_set_text_fmt(height_label, "BLOCK %s", height_txt);
+        lv_obj_set_style_text_color(height_label, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(height_label, &lv_font_montserrat_14, 0);
+        lv_obj_align(height_label, LV_ALIGN_TOP_MID, 0, 14);
 
         char median_txt[32];
         int median_fee_i = (int)(b->median_fee + 0.5);
-        lv_snprintf(median_txt, sizeof(median_txt), "~%d sat/vB", median_fee_i);
+        lv_snprintf(median_txt, sizeof(median_txt), "~%d", median_fee_i);
         lv_obj_t *median_label = lv_label_create(card);
         lv_label_set_text(median_label, median_txt);
-        lv_obj_set_style_text_color(median_label, COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_text_font(median_label, &lv_font_montserrat_20, 0);
-        lv_obj_align(median_label, LV_ALIGN_TOP_MID, 0, median_y);
+        lv_obj_set_style_text_color(median_label, COLOR_ACCENT, 0);
+        lv_obj_set_style_text_font(median_label, &lv_font_montserrat_36, 0);
+        lv_obj_align(median_label, LV_ALIGN_TOP_MID, 0, 42);
 
-        char fee_min_txt[16];
-        char fee_max_txt[16];
-        format_fee_value(b->fee_min, fee_min_txt, sizeof(fee_min_txt));
-        format_fee_value(b->fee_max, fee_max_txt, sizeof(fee_max_txt));
-        char range_txt[48];
-        lv_snprintf(range_txt, sizeof(range_txt), "%s - %s sat/vB", fee_min_txt, fee_max_txt);
-        lv_obj_t *range_label = lv_label_create(card);
-        lv_label_set_text(range_label, range_txt);
-        lv_obj_set_style_text_color(range_label, glass ? COLOR_TEXT_SECONDARY : color_fee, 0);
-        lv_obj_set_style_text_font(range_label, &lv_font_montserrat_14, 0);
-        lv_obj_align(range_label, LV_ALIGN_TOP_MID, 0, range_y);
+        lv_obj_t *median_cap = lv_label_create(card);
+        lv_label_set_text(median_cap, "MEDIAN SAT/VB");
+        lv_obj_set_style_text_color(median_cap, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(median_cap, &lv_font_montserrat_12, 0);
+        lv_obj_align(median_cap, LV_ALIGN_TOP_MID, 0, 82);
 
         char btc_txt[32];
         format_btc_from_sats(b->total_fees_sat, btc_txt, sizeof(btc_txt));
-        lv_obj_t *btc_label = lv_label_create(card);
-        lv_label_set_text(btc_label, btc_txt);
-        lv_obj_set_style_text_color(btc_label, COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_text_font(btc_label, &lv_font_montserrat_28, 0);
-        lv_obj_align(btc_label, LV_ALIGN_TOP_MID, 0, btc_y);
-
         char tx_txt[40];
-        lv_snprintf(tx_txt, sizeof(tx_txt), "%d transactions", b->tx_count);
-        lv_obj_t *tx_label = lv_label_create(card);
-        lv_label_set_text(tx_label, tx_txt);
-        lv_obj_set_style_text_color(tx_label, COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_text_font(tx_label, &lv_font_montserrat_14, 0);
-        lv_obj_align(tx_label, LV_ALIGN_TOP_MID, 0, tx_y);
+        lv_snprintf(tx_txt, sizeof(tx_txt), "%d tx  -  %s", b->tx_count, btc_txt);
+        lv_obj_t *detail_label = lv_label_create(card);
+        lv_label_set_text(detail_label, tx_txt);
+        lv_obj_set_style_text_color(detail_label, COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_font(detail_label, &lv_font_montserrat_14, 0);
+        lv_obj_set_width(detail_label, CARD_W - 20);
+        lv_label_set_long_mode(detail_label, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(detail_label, LV_ALIGN_TOP_MID, 0, 114);
 
-        lv_obj_t *bottom_bar = lv_obj_create(card);
-        lv_obj_set_size(bottom_bar, CARD_W, bottom_bar_h);
-        lv_obj_align(bottom_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-        lv_obj_set_style_radius(bottom_bar, 0, 0);
-        lv_obj_set_style_bg_color(bottom_bar, glass ? lv_color_white() : color_bottom, 0);
-        lv_obj_set_style_bg_opa(bottom_bar, glass ? LV_OPA_20 : LV_OPA_COVER, 0);
-        if (glass)
-        {
-            lv_obj_clear_flag(bottom_bar, LV_OBJ_FLAG_CLICKABLE);
-        }
-        lv_obj_set_style_border_width(bottom_bar, 0, 0);
-        lv_obj_set_style_pad_all(bottom_bar, 0, 0);
-        lv_obj_clear_flag(bottom_bar, LV_OBJ_FLAG_SCROLLABLE);
-
-        char ago_txt[32];
+        char footer[80];
         if (b->minutes_ago >= 0)
         {
-            lv_snprintf(ago_txt, sizeof(ago_txt), "%d minutes ago", b->minutes_ago);
+            lv_snprintf(footer, sizeof(footer), "%s  -  %d min ago",
+                        b->pool_name[0] ? b->pool_name : "Unknown pool",
+                        b->minutes_ago);
         }
         else
         {
-            lv_snprintf(ago_txt, sizeof(ago_txt), "-- minutes ago");
+            lv_snprintf(footer, sizeof(footer), "%s",
+                        b->pool_name[0] ? b->pool_name : "Unknown pool");
         }
-        lv_obj_t *ago_label = lv_label_create(bottom_bar);
-        lv_label_set_text(ago_label, ago_txt);
-        lv_obj_set_style_text_color(ago_label, COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_text_font(ago_label, &lv_font_montserrat_20, 0);
-        lv_obj_center(ago_label);
-
-        if (b->pool_name[0] != '\0')
-        {
-            lv_obj_t *pool_label = lv_label_create(card_wrap);
-            lv_label_set_text(pool_label, b->pool_name);
-            lv_label_set_long_mode(pool_label, LV_LABEL_LONG_DOT);
-            lv_obj_set_width(pool_label, CARD_W);
-            lv_obj_set_style_text_color(pool_label, COLOR_TEXT_PRIMARY, 0);
-            lv_obj_set_style_text_font(pool_label, &lv_font_montserrat_14, 0);
-            lv_obj_set_style_text_align(pool_label, LV_TEXT_ALIGN_CENTER, 0);
-            lv_obj_align(pool_label, LV_ALIGN_BOTTOM_MID, 0, -wrap_bottom_pad);
-            if (glass)
-            {
-                glass_pill_label(pool_label, false);
-            }
-        }
+        lv_obj_t *footer_label = lv_label_create(card);
+        lv_label_set_text(footer_label, footer);
+        lv_label_set_long_mode(footer_label, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(footer_label, CARD_W - 24);
+        lv_obj_set_style_text_color(footer_label, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(footer_label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(footer_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(footer_label, LV_ALIGN_BOTTOM_MID, 0, -18);
     }
 
     if (glass)
@@ -890,12 +816,6 @@ static bool json_get_double(const char *obj, const char *key, double *out)
     p += strlen(key);
     *out = strtod(p, NULL);
     return true;
-}
-
-static void format_fee_value(double v, char *buf, size_t buf_size)
-{
-    int v_i = (int)(v + 0.5);
-    lv_snprintf(buf, buf_size, "%d", v_i);
 }
 
 static void format_btc_from_sats(long long sats, char *buf, size_t buf_size)

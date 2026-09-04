@@ -37,7 +37,7 @@ SLOTS = [
     "text", "text dim", "on accent", "border", "nav", "icon",
 ]
 SCREENS = ["home", "night", "block", "clock", "price", "mempool", "wifi", "settings",
-           "odds", "payout"]
+           "odds", "payout", "feed"]
 
 
 # ---------------------------------------------------------------- BAP encoding

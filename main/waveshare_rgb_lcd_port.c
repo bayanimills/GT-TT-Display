@@ -5,6 +5,16 @@ static const char *TAG = "example";
 static uint8_t current_brightness = LCD_BACKLIGHT_DEFAULT_BRIGHTNESS;
 static bool backlight_initialized = false;
 
+static uint32_t lcd_backlight_duty_for_percent(uint8_t brightness_percent)
+{
+    if (brightness_percent == 0U) return 0U;
+    if (brightness_percent > 100U) brightness_percent = 100U;
+
+    const uint32_t min_duty = LCD_BACKLIGHT_MIN_DUTY;
+    const uint32_t duty_range = LCD_BACKLIGHT_MAX_DUTY - min_duty;
+    return min_duty + ((duty_range * brightness_percent) / 100U);
+}
+
 // VSYNC event callback function
 IRAM_ATTR static bool rgb_lcd_on_vsync_event(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx)
 {
@@ -331,7 +341,7 @@ esp_err_t lcd_backlight_pwm_init(void)
     }
     
     // Configure LEDC channel for TPS61161 - start with default brightness
-    uint32_t default_duty = (LCD_BACKLIGHT_MAX_DUTY * LCD_BACKLIGHT_DEFAULT_BRIGHTNESS) / 100;
+    uint32_t default_duty = lcd_backlight_duty_for_percent(LCD_BACKLIGHT_DEFAULT_BRIGHTNESS);
     ledc_channel_config_t ledc_channel = {
         .speed_mode     = LCD_BACKLIGHT_LEDC_MODE,
         .channel        = LCD_BACKLIGHT_LEDC_CHANNEL,
@@ -381,17 +391,14 @@ esp_err_t lcd_backlight_set_brightness(uint8_t brightness_percent)
     }
 
     // TPS61161 brightness control via GPIO15 PWM (GPIO12 handles display enable)
-    uint32_t duty;
+    uint32_t duty = lcd_backlight_duty_for_percent(brightness_percent);
     if (brightness_percent == 0) {
         // 0% brightness = PWM off
-        duty = 0;
         ESP_LOGI(TAG, "GPIO15 PWM brightness 0%% -> PWM OFF (display stays enabled via GPIO12)");
     } else {
         // Map 1-100% to minimum-maximum duty cycle for TPS61161
         uint32_t min_duty = LCD_BACKLIGHT_MIN_DUTY;
         uint32_t max_duty = LCD_BACKLIGHT_MAX_DUTY;
-        uint32_t duty_range = max_duty - min_duty;
-        duty = min_duty + ((duty_range * brightness_percent) / 100);
         ESP_LOGI(TAG, "GPIO15 PWM brightness %d%% -> duty: %lu (range: %lu-%lu)",
                  brightness_percent, duty, min_duty, max_duty);
     }
@@ -440,8 +447,8 @@ esp_err_t lcd_backlight_fade_to(uint8_t target_brightness, uint32_t fade_time_ms
         target_brightness = 100;
     }
 
-    // Calculate target duty cycle
-    uint32_t target_duty = (LCD_BACKLIGHT_MAX_DUTY * target_brightness) / 100;
+    // Keep fades on exactly the same TPS61161 curve as direct brightness changes.
+    uint32_t target_duty = lcd_backlight_duty_for_percent(target_brightness);
 
     // Install fade function
     esp_err_t ret = ledc_set_fade_with_time(LCD_BACKLIGHT_LEDC_MODE, LCD_BACKLIGHT_LEDC_CHANNEL,
