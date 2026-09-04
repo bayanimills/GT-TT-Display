@@ -10,8 +10,7 @@ idf_component_register(
         "assets/star.c"
         "assets/glass_icons.c"
         "angelwish_96.c"
-    INCLUDE_DIRS "."
-    PRIV_REQUIRES mbedtls esp_partition)
+    INCLUDE_DIRS ".")
 
 idf_component_get_property(lvgl_lib lvgl__lvgl COMPONENT_LIB)
 target_compile_options(${lvgl_lib} PRIVATE -Wno-format)
