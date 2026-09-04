@@ -9,6 +9,7 @@
  * them. */
 #include "esp_err.h"
 #include "esp_http_client.h"
+#include "esp_app_desc.h"
 
 /* esp_https_ota_perform() returns this while more data is still coming. */
 #define ESP_ERR_HTTPS_OTA_IN_PROGRESS 0x8001
@@ -31,3 +32,5 @@ esp_err_t esp_https_ota_finish(esp_https_ota_handle_t handle);
 esp_err_t esp_https_ota_abort(esp_https_ota_handle_t handle);
 int       esp_https_ota_get_image_len_read(esp_https_ota_handle_t handle);
 int       esp_https_ota_get_image_size(esp_https_ota_handle_t handle);
+esp_err_t esp_https_ota_get_img_desc(esp_https_ota_handle_t handle, esp_app_desc_t *new_app_info);
+bool      esp_https_ota_is_complete_data_received(esp_https_ota_handle_t handle);

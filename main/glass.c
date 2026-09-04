@@ -793,8 +793,8 @@ static lv_obj_t *glass_pill_button(lv_obj_t *parent, const char *symbol, const c
                                    lv_event_cb_t cb, void *user_data)
 {
     lv_obj_t *pill = lv_obj_create(parent);
-    lv_obj_set_size(pill, 176, 38);
-    lv_obj_set_style_radius(pill, 19, 0);
+    lv_obj_set_size(pill, 176, 44);
+    lv_obj_set_style_radius(pill, 22, 0);
     lv_obj_set_style_bg_color(pill, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(pill, LV_OPA_20, 0);
     lv_obj_set_style_border_width(pill, 1, 0);
@@ -1496,6 +1496,20 @@ static void drawer_toggle_cb(lv_event_t *e)
     else               glass_drawer_open();
 }
 
+static void drawer_grabber_cb(lv_event_t *e)
+{
+    static uint32_t gesture_at = 0;
+    if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
+        lv_indev_t *indev = lv_indev_get_act();
+        if (!indev || lv_indev_get_gesture_dir(indev) != LV_DIR_TOP) return;
+        gesture_at = lv_tick_get();
+        if (!s_drawer_open) glass_drawer_open();
+        return;
+    }
+    if (lv_tick_elaps(gesture_at) < 300U) return; /* release after the swipe */
+    drawer_toggle_cb(e);
+}
+
 void glass_attach_drawer_toggle(lv_obj_t *obj)
 {
     lv_obj_add_event_cb(obj, drawer_toggle_cb, LV_EVENT_CLICKED, NULL);
@@ -1746,8 +1760,8 @@ static lv_obj_t *sheet_frame(int w, int h, const char *title)
     lv_obj_set_pos(t, 28, 22);
 
     lv_obj_t *close = lv_obj_create(s_sheet_panel);
-    lv_obj_set_size(close, 36, 36);
-    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -20, 16);
+    lv_obj_set_size(close, 48, 48);
+    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -16, 12);
     lv_obj_set_style_radius(close, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(close, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(close, LV_OPA_20, 0);
@@ -1831,9 +1845,9 @@ static void build_widgets_sheet(void)
     for (int i = 0; i < 2; i++) {
         bool on = (s_layout == (glass_layout_t) i);
         lv_obj_t *seg = lv_obj_create(p);
-        lv_obj_set_size(seg, 96, 34);
-        lv_obj_set_pos(seg, 370 + i * 100, 18);
-        lv_obj_set_style_radius(seg, 17, 0);
+        lv_obj_set_size(seg, 96, 44);
+        lv_obj_set_pos(seg, 370 + i * 100, 12);
+        lv_obj_set_style_radius(seg, 22, 0);
         lv_obj_set_style_bg_color(seg, on ? COLOR_ACCENT : lv_color_white(), 0);
         lv_obj_set_style_bg_opa(seg, on ? LV_OPA_COVER : LV_OPA_20, 0);
         lv_obj_set_style_border_width(seg, 0, 0);
@@ -2271,9 +2285,19 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
         lv_obj_clear_flag(s_host_wall, LV_OBJ_FLAG_CLICKABLE);
     }
 
-    /* Grabber: the one persistent cue that the surface answers a tap. It is
-     * not a hit target itself, so the tap reaches the screen like any other. */
-    lv_obj_t *grab = lv_obj_create(scr);
+    /* A generous invisible target makes the persistent grabber truthful: it
+     * accepts either a tap or the upward swipe the visual affordance implies. */
+    lv_obj_t *grab_target = lv_obj_create(scr);
+    lv_obj_set_size(grab_target, 180, 44);
+    lv_obj_align(grab_target, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_opa(grab_target, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(grab_target, 0, 0);
+    lv_obj_set_style_pad_all(grab_target, 0, 0);
+    lv_obj_clear_flag(grab_target, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_GESTURE, NULL);
+
+    lv_obj_t *grab = lv_obj_create(grab_target);
     lv_obj_set_size(grab, 56, 6);
     lv_obj_align(grab, LV_ALIGN_BOTTOM_MID, 0, -6);
     lv_obj_set_style_radius(grab, 3, 0);

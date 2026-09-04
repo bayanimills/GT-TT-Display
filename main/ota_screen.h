@@ -19,7 +19,7 @@ extern "C" {
 void ota_screen_show(void);
 
 /**
- * @brief Update progress (updates only every 25% to minimize PSRAM writes)
+ * @brief Update progress when the reported percentage changes
  * @param progress Progress percentage 0-100
  */
 void ota_screen_update_progress(int progress);

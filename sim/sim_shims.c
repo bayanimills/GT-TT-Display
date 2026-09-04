@@ -24,9 +24,23 @@ void ota_check_for_updates(void)
 {
     ESP_LOGI(TAG, "ota check (no-op in sim)");
 }
+void ota_check_original_release(void)
+{
+    s_ota.restore_status = OTA_RESTORE_READY;
+    snprintf(s_ota.original_version, sizeof(s_ota.original_version), "v1.1.2");
+    ESP_LOGI(TAG, "ota: official release ready (sim)");
+}
 esp_err_t ota_update_start_latest(void) { return ESP_FAIL; }
+esp_err_t ota_restore_original_latest(void) { return ESP_FAIL; }
 esp_err_t ota_update_start(const char *url) { (void) url; return ESP_FAIL; }
-void ota_update_get_info(ota_info_t *info) { if (info) *info = s_ota; }
+void ota_update_get_info(ota_info_t *info)
+{
+    if (!info) return;
+    *info = s_ota;
+    if (!info->current_version[0]) {
+        snprintf(info->current_version, sizeof(info->current_version), "sim");
+    }
+}
 bool ota_update_is_running(void) { return false; }
 void ota_update_confirm_running_image(void) { ESP_LOGI(TAG, "ota: image confirmed (sim no-op)"); }
 const char *ota_get_current_version(void) { return "sim"; }
@@ -73,12 +87,12 @@ void sim_ota_fake_available(bool on)
 {
     s_ota.status = on ? OTA_STATUS_UPDATE_AVAILABLE : OTA_STATUS_IDLE;
 }
+void sim_ota_fake_original_available(bool on)
+{
+    s_ota.restore_status = on ? OTA_RESTORE_READY : OTA_RESTORE_IDLE;
+    snprintf(s_ota.original_version, sizeof(s_ota.original_version), "%s", on ? "v1.1.2" : "");
+}
 void ota_update_start_auto_check(void) { }
-
-void ota_screen_show(void) { }
-void ota_screen_update_progress(int p) { (void) p; }
-void ota_screen_show_error(const char *e) { ESP_LOGE(TAG, "ota error: %s", e ? e : "?"); }
-void ota_screen_hide(void) { }
 
 /* ---- BAP client ----
  * The sim is always "connected": sentences arrive over stdin rather than UART. */

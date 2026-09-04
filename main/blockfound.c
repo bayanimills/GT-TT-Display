@@ -223,8 +223,6 @@ void blockfound_screen_create(void)
     lv_obj_set_style_bg_opa(bf_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(bf_screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(bf_screen, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_add_flag(bf_screen, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(bf_screen, bf_dismiss_cb, LV_EVENT_CLICKED, NULL);
 
     /* Everything sits on the accent, so the ink is whichever of black or
      * white actually reads on it, for all nine palettes and custom ones. */
@@ -255,14 +253,25 @@ void blockfound_screen_create(void)
     lv_obj_set_style_text_color(detail, ink, 0);
     lv_obj_set_style_text_opa(detail, (lv_opa_t)210, 0);
     lv_obj_set_style_text_font(detail, &lv_font_montserrat_24, 0);
-    lv_obj_align(detail, LV_ALIGN_BOTTOM_MID, 0, -76);
+    lv_obj_align(detail, LV_ALIGN_BOTTOM_MID, 0, -92);
 
-    lv_obj_t *hint = lv_label_create(bf_screen);
-    lv_label_set_text(hint, "touch to dismiss");
+    lv_obj_t *dismiss = lv_btn_create(bf_screen);
+    lv_obj_set_size(dismiss, 200, 52);
+    lv_obj_align(dismiss, LV_ALIGN_BOTTOM_MID, 0, -22);
+    lv_obj_set_style_bg_color(dismiss, ink, 0);
+    lv_obj_set_style_bg_opa(dismiss, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(dismiss, 2, 0);
+    lv_obj_set_style_border_color(dismiss, ink, 0);
+    lv_obj_set_style_border_opa(dismiss, LV_OPA_70, 0);
+    lv_obj_set_style_radius(dismiss, 12, 0);
+    lv_obj_set_style_shadow_width(dismiss, 0, 0);
+    lv_obj_add_event_cb(dismiss, bf_dismiss_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *hint = lv_label_create(dismiss);
+    lv_label_set_text(hint, "DISMISS");
     lv_obj_set_style_text_color(hint, ink, 0);
-    lv_obj_set_style_text_opa(hint, (lv_opa_t)150, 0);
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_16, 0);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -32);
+    lv_obj_center(hint);
 
     (void)glass;
 }

@@ -26,14 +26,15 @@ esp_err_t bap_parse_and_handle_message(const char *message) {
         return ESP_ERR_INVALID_ARG;
     }
     
-    ESP_LOGI(TAG, "Received: %s", message);
-    
     bap_message_t parsed_msg;
     esp_err_t ret = bap_parse_message_header(message, &parsed_msg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to parse message header");
         return ret;
     }
+    /* Values can contain a payout address, SSID or Wi-Fi password. Log the
+     * envelope, never the payload; simulator logs are exposed in its UI too. */
+    ESP_LOGD(TAG, "Received BAP %s for %s", parsed_msg.command_str, parsed_msg.parameter);
     
     if (parsed_msg.command == BAP_CMD_RES) {
         // Verify checksum for RES messages
@@ -111,7 +112,7 @@ esp_err_t bap_handle_response(const bap_message_t *msg) {
     } else if (strcmp(msg->parameter, "mode") == 0) {
         ret = bap_handle_mode(msg->value);
     } else {
-        ESP_LOGI(TAG, "Received RES for %s: %s", msg->parameter, msg->value);
+        ESP_LOGI(TAG, "Received unhandled RES for %s", msg->parameter);
         // Unknown parameter, but not an error
     }
     
@@ -310,7 +311,7 @@ esp_err_t bap_handle_pool_user_response(const char *value) {
         return ESP_ERR_INVALID_ARG;
     }
     
-    ESP_LOGI(TAG, "Received pool user: %s", value);
+    ESP_LOGI(TAG, "Received pool user (redacted)");
     
     /* On a solo pool the user is the payout address with the worker name
      * after a dot, which is the only place the display learns where its own
@@ -335,7 +336,7 @@ esp_err_t bap_handle_wifi_ssid_response(const char *value) {
         return ESP_ERR_INVALID_ARG;
     }
     
-    ESP_LOGI(TAG, "Received WiFi SSID: %s", value);
+    ESP_LOGI(TAG, "Received WiFi SSID (redacted)");
     
     if (lvgl_port_lock(100)) {
         wifi_update_ssid(value);
@@ -369,7 +370,7 @@ esp_err_t bap_handle_wifi_ip_response(const char *value) {
         return ESP_ERR_INVALID_ARG;
     }
     
-    ESP_LOGI(TAG, "Received WiFi IP: %s", value);
+    ESP_LOGI(TAG, "Received WiFi IP (redacted)");
     
     if (lvgl_port_lock(100)) {
         wifi_update_ip(value);

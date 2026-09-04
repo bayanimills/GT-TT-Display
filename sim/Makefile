@@ -16,7 +16,7 @@ endif
 # Excluded from main/: the real panel driver, the ESP LVGL port and the
 # firmware entry point -- sim_main.c replaces all three.
 MAIN_EXCLUDE := $(MAIN)/main.c $(MAIN)/lvgl_port.c $(MAIN)/waveshare_rgb_lcd_port.c \
-                $(MAIN)/ota_update.c $(MAIN)/ota_screen.c $(MAIN)/bap_uart.c $(MAIN)/bap_client.c
+                $(MAIN)/ota_update.c $(MAIN)/bap_uart.c $(MAIN)/bap_client.c
 
 MAIN_SRC  := $(filter-out $(MAIN_EXCLUDE),$(wildcard $(MAIN)/*.c))
 # logo_background.c is #included directly by loading.c, so never compile it alone.

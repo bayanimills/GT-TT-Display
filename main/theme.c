@@ -18,12 +18,12 @@ static const char *TAG = "theme";
 /* Slot order must match theme_slot_t:
  * background, card, accent, red, text, text2, on-accent, border, nav */
 static const theme_preset_t k_presets[] = {
-    { "Bitaxe Red",     { 0x050506, 0x0F1218, 0xD4021B, 0xD4021B, 0xFFFFFF, 0xA3A3A3, 0x000000, 0x1A1D24, 0x0C0F14 } },
+    { "Bitaxe Red",     { 0x050506, 0x0F1218, 0xF52245, 0xF52245, 0xFFFFFF, 0xA3A3A3, 0x000000, 0x1A1D24, 0x0C0F14 } },
     { "Bitcoin Orange", { 0x0A0703, 0x17110A, 0xF7931A, 0xE8543F, 0xFFFFFF, 0xB09A80, 0x1A1206, 0x2A2113, 0x120D07 } },
     { "Matrix Green",   { 0x000A03, 0x03150A, 0x39FF14, 0xFF3B30, 0xD9FFD0, 0x6FA867, 0x001505, 0x0C2A14, 0x021207 } },
     { "Cyber Cyan",     { 0x00080D, 0x061620, 0x00E5FF, 0xFF2D6F, 0xEAFDFF, 0x7FA6B3, 0x001C24, 0x0B2C38, 0x041019 } },
-    { "Deep Violet",    { 0x08040F, 0x150C24, 0x7C3BFF, 0xFF4D6D, 0xF2ECFF, 0x9E8FC2, 0xFFFFFF, 0x271A3D, 0x100823 } },
-    { "Nord",           { 0x2E3440, 0x3B4252, 0x88C0D0, 0xBF616A, 0xECEFF4, 0x9BA6B8, 0x1D232C, 0x4C566A, 0x272D38 } },
+    { "Deep Violet",    { 0x08040F, 0x150C24, 0x9966FF, 0xFF4D6D, 0xF2ECFF, 0x9E8FC2, 0x000000, 0x271A3D, 0x100823 } },
+    { "Nord",           { 0x2E3440, 0x3B4252, 0x88C0D0, 0xBF616A, 0xECEFF4, 0xA6B1C3, 0x1D232C, 0x4C566A, 0x272D38 } },
     { "Gruvbox",        { 0x1D2021, 0x282828, 0xFE8019, 0xFB4934, 0xEBDBB2, 0xA89984, 0x1D2021, 0x3C3836, 0x232526 } },
     { "Paper (light)",  { 0xF4F2ED, 0xFFFFFF, 0xC2410C, 0xB91C1C, 0x18181B, 0x6B7280, 0xFFFFFF, 0xE2E0DA, 0xEDEAE3 } },
     { "Mono",           { 0x000000, 0x101010, 0xFFFFFF, 0xBBBBBB, 0xFFFFFF, 0x9A9A9A, 0x000000, 0x272727, 0x0A0A0A } },
@@ -213,8 +213,11 @@ lv_color_t theme_ink_on(lv_color_t bg)
     const uint32_t r = (c >> 16) & 0xFFu;
     const uint32_t g = (c >> 8) & 0xFFu;
     const uint32_t b = c & 0xFFu;
-    /* Rec. 709 luma in fixed point. Enough to choose between black and
-     * white, and no pow() on a part with better uses for its cycles. */
-    const uint32_t luma = (54u * r + 183u * g + 19u * b) >> 8;
-    return luma > 140u ? lv_color_black() : lv_color_white();
+    /* Squaring the sRGB channels is a cheap approximation of linear light and
+     * makes saturated red/violet choose correctly; gamma-coded luma made both
+     * look artificially dark and picked lower-contrast white ink. Black wins
+     * over white at relative luminance ~= 0.179. */
+    const uint32_t linear_luma = 2126u * r * r + 7152u * g * g + 722u * b * b;
+    const uint32_t crossover = 1790u * 255u * 255u;
+    return linear_luma > crossover ? lv_color_black() : lv_color_white();
 }

@@ -55,6 +55,9 @@ static lv_obj_t *ota_status_label = NULL;
 static lv_obj_t *ota_progress_bar = NULL;
 static lv_obj_t *ota_version_label = NULL;
 static lv_timer_t *ota_timer = NULL;
+static lv_obj_t *ota_restore_btn = NULL;
+static lv_obj_t *ota_restore_status_label = NULL;
+static lv_obj_t *ota_restore_overlay = NULL;
 
 static settings_info_t current_settings = {
     .performance_mode = PERFORMANCE_MEDIUM,
@@ -111,6 +114,8 @@ static void settings_display_schedule_changed(lv_event_t *e);
 static void settings_refresh_schedule_status(void);
 static void settings_ota_auto_toggled(lv_event_t *e);
 static void settings_schedule_timer_cb(lv_timer_t *t);
+static void settings_original_restore_clicked(lv_event_t *e);
+static void settings_restore_overlay_close(lv_event_t *e);
 
 static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
 {
@@ -423,6 +428,11 @@ static void cleanup_system_overlay(lv_event_t *e)
         lv_obj_del(sys_overlay);
         sys_overlay = NULL;
     }
+    if (ota_restore_overlay) {
+        lv_obj_del(ota_restore_overlay);
+        ota_restore_overlay = NULL;
+        display_control_pop_overlay();
+    }
     diag_counter = 0;
 }
 
@@ -554,6 +564,43 @@ static void ota_update_timer_cb(lv_timer_t *timer)
             lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
             break;
     }
+
+    if (ota_restore_btn && ota_restore_status_label) {
+        lv_obj_t *restore_label = lv_obj_get_child(ota_restore_btn, 0);
+        switch (info.restore_status) {
+            case OTA_RESTORE_IDLE:
+                lv_label_set_text(ota_restore_status_label,
+                                  "Official release: check before restoring");
+                if (restore_label) lv_label_set_text(restore_label, "CHECK OFFICIAL RELEASE");
+                lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
+                break;
+            case OTA_RESTORE_CHECKING:
+                lv_label_set_text(ota_restore_status_label,
+                                  "Checking bitaxeorg for its latest release...");
+                if (restore_label) lv_label_set_text(restore_label, "CHECKING...");
+                lv_obj_add_state(ota_restore_btn, LV_STATE_DISABLED);
+                break;
+            case OTA_RESTORE_READY:
+                lv_label_set_text_fmt(ota_restore_status_label,
+                                      "Latest official release: %s", info.original_version);
+                if (restore_label) lv_label_set_text(restore_label, "ATTEMPT OFFICIAL RESTORE");
+                lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
+                break;
+            case OTA_RESTORE_ERROR:
+                lv_label_set_text_fmt(ota_restore_status_label, "Official check failed: %s",
+                                      info.restore_error_msg[0] ? info.restore_error_msg : "Unknown error");
+                if (restore_label) lv_label_set_text(restore_label, "TRY OFFICIAL CHECK AGAIN");
+                lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
+                break;
+        }
+    }
+
+    /* A check or flash from either channel owns the OTA state machine. Disable
+     * both actions so two fingers, the daily poll, and a restore cannot race. */
+    if (ota_update_is_running()) {
+        lv_obj_add_state(ota_update_btn, LV_STATE_DISABLED);
+        if (ota_restore_btn) lv_obj_add_state(ota_restore_btn, LV_STATE_DISABLED);
+    }
 }
 
 // OTA Update button click handler
@@ -569,6 +616,108 @@ static void settings_ota_update_clicked(lv_event_t *e)
         }
     } else {
         ota_check_for_updates();
+    }
+}
+
+static void settings_restore_overlay_close(lv_event_t *e)
+{
+    (void)e;
+    if (ota_restore_overlay) {
+        lv_obj_del(ota_restore_overlay);
+        ota_restore_overlay = NULL;
+        display_control_pop_overlay();
+    }
+}
+
+static void settings_restore_confirmed(lv_event_t *e)
+{
+    (void)e;
+    settings_restore_overlay_close(NULL);
+    esp_err_t ret = ota_restore_original_latest();
+    if (ret != ESP_OK && ota_restore_status_label) {
+        lv_label_set_text(ota_restore_status_label, "Could not start the official restore");
+    }
+}
+
+static void settings_show_restore_confirmation(const ota_info_t *info)
+{
+    if (ota_restore_overlay || !settings_screen || !info) return;
+
+    display_control_push_overlay();
+    ota_restore_overlay = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(ota_restore_overlay, SCREEN_WIDTH, SCREEN_HEIGHT);
+    lv_obj_set_pos(ota_restore_overlay, 0, 0);
+    lv_obj_set_style_bg_color(ota_restore_overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(ota_restore_overlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(ota_restore_overlay, 0, 0);
+    lv_obj_set_style_pad_all(ota_restore_overlay, 0, 0);
+    lv_obj_clear_flag(ota_restore_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(ota_restore_overlay, settings_restore_overlay_close, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *dialog;
+    if (glass_active()) {
+        dialog = glass_pane(ota_restore_overlay, 650, 350, 24);
+    } else {
+        dialog = lv_obj_create(ota_restore_overlay);
+        lv_obj_set_size(dialog, 650, 350);
+        lv_obj_set_style_bg_color(dialog, COLOR_CARD_BG, 0);
+        lv_obj_set_style_bg_opa(dialog, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(dialog, 2, 0);
+        lv_obj_set_style_border_color(dialog, COLOR_ACCENT, 0);
+        lv_obj_set_style_radius(dialog, 18, 0);
+        lv_obj_set_style_pad_all(dialog, 22, 0);
+    }
+    lv_obj_center(dialog);
+    lv_obj_clear_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(dialog, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *title = lv_label_create(dialog);
+    lv_label_set_text(title, "ATTEMPT OFFICIAL RESTORE?");
+    lv_obj_set_style_text_color(title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_obj_t *target = lv_label_create(dialog);
+    lv_label_set_text_fmt(target, "Current: %s     Official target: %s",
+                          info->current_version[0] ? info->current_version : "Unknown",
+                          info->original_version[0] ? info->original_version : "Unknown");
+    lv_obj_set_style_text_color(target, COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(target, &lv_font_montserrat_16, 0);
+    lv_obj_align(target, LV_ALIGN_TOP_MID, 0, 48);
+
+    lv_obj_t *warning = lv_label_create(dialog);
+    lv_label_set_text(warning,
+        "This attempts to replace the custom interface with the latest bitaxeorg release.\n"
+        "Display settings are kept, but custom screens and themes are removed.\n\n"
+        "Important: if custom firmware was installed by USB, its rollback-enabled\n"
+        "bootloader may undo this OTA restore after a later reboot. Use the official\n"
+        "USB factory image for a guaranteed permanent restore.");
+    lv_label_set_long_mode(warning, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(warning, 590);
+    lv_obj_set_style_text_align(warning, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(warning, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(warning, &lv_font_montserrat_14, 0);
+    lv_obj_align(warning, LV_ALIGN_TOP_MID, 0, 82);
+
+    lv_obj_t *cancel = create_settings_button(dialog, "CANCEL", settings_restore_overlay_close, false);
+    lv_obj_set_size(cancel, 190, 48);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 18, -4);
+    lv_obj_t *restore = create_settings_button(dialog, "TRY RESTORE VIA OTA", settings_restore_confirmed, true);
+    lv_obj_set_size(restore, 250, 48);
+    lv_obj_align(restore, LV_ALIGN_BOTTOM_RIGHT, -18, -4);
+
+    if (glass_active()) glass_screen_ready(lv_scr_act());
+}
+
+static void settings_original_restore_clicked(lv_event_t *e)
+{
+    (void)e;
+    ota_info_t info;
+    ota_update_get_info(&info);
+    if (info.restore_status == OTA_RESTORE_READY) {
+        settings_show_restore_confirmation(&info);
+    } else {
+        ota_check_original_release();
     }
 }
 
@@ -867,6 +1016,7 @@ void settings_screen_create(void)
 
     fan_slider = lv_slider_create(fan_section);
     lv_obj_set_size(fan_slider, 420, 20);
+    lv_obj_set_ext_click_area(fan_slider, 12);
     lv_obj_align(fan_slider, LV_ALIGN_TOP_LEFT, 0, 70);
     lv_slider_set_range(fan_slider, 0, 100);
     lv_slider_set_value(fan_slider, current_settings.fan_speed_percent, LV_ANIM_OFF);
@@ -885,7 +1035,7 @@ void settings_screen_create(void)
     lv_obj_align(fan_value_label, LV_ALIGN_TOP_LEFT, 450, 72);
 
     fan_save_btn = create_settings_button(fan_section, "SAVE FAN SETTINGS", settings_fan_save_clicked, false);
-    lv_obj_set_size(fan_save_btn, 220, 36);
+    lv_obj_set_size(fan_save_btn, 220, 44);
     lv_obj_align(fan_save_btn, LV_ALIGN_TOP_LEFT, 0, 115);
 
     update_fan_controls();
@@ -906,6 +1056,7 @@ void settings_screen_create(void)
 
     brightness_slider = lv_slider_create(brightness_section);
     lv_obj_set_size(brightness_slider, 550, 20);
+    lv_obj_set_ext_click_area(brightness_slider, 12);
     lv_obj_align(brightness_slider, LV_ALIGN_TOP_LEFT, 0, 30);
     lv_slider_set_range(brightness_slider, 5, 100);
     lv_slider_set_value(brightness_slider, current_settings.brightness_percent, LV_ANIM_OFF);
@@ -940,7 +1091,7 @@ void settings_screen_create(void)
     lv_obj_align(theme_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     theme_dropdown = lv_dropdown_create(theme_section);
-    lv_obj_set_size(theme_dropdown, 300, 34);
+    lv_obj_set_size(theme_dropdown, 300, 44);
     lv_obj_align(theme_dropdown, LV_ALIGN_TOP_LEFT, 140, -4);
     lv_dropdown_set_options(theme_dropdown, theme_dropdown_options());
     lv_dropdown_set_selected(theme_dropdown, theme_get_index());
@@ -964,7 +1115,7 @@ void settings_screen_create(void)
     lv_obj_align(skin_title, LV_ALIGN_TOP_LEFT, 458, 0);
 
     skin_dropdown = lv_dropdown_create(theme_section);
-    lv_obj_set_size(skin_dropdown, 150, 34);
+    lv_obj_set_size(skin_dropdown, 150, 44);
     lv_obj_align(skin_dropdown, LV_ALIGN_TOP_LEFT, 510, -4);
     lv_dropdown_set_options(skin_dropdown, "Classic\nGlass");
     lv_dropdown_set_selected(skin_dropdown, (uint16_t) theme_get_skin());
@@ -1017,7 +1168,7 @@ void settings_screen_create(void)
     lv_obj_align(timezone_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     timezone_dropdown = lv_dropdown_create(timezone_section);
-    lv_obj_set_size(timezone_dropdown, 300, 34);
+    lv_obj_set_size(timezone_dropdown, 300, 44);
     lv_obj_align(timezone_dropdown, LV_ALIGN_TOP_LEFT, 140, -4);
     lv_dropdown_set_options(timezone_dropdown, timezone_options);
     lv_dropdown_set_selected(timezone_dropdown, current_timezone_index);
@@ -1044,7 +1195,7 @@ void settings_screen_create(void)
     lv_obj_align(data_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     data_source_dropdown = lv_dropdown_create(data_section);
-    lv_obj_set_size(data_source_dropdown, 220, 34);
+    lv_obj_set_size(data_source_dropdown, 220, 44);
     lv_obj_align(data_source_dropdown, LV_ALIGN_TOP_LEFT, 140, -4);
     lv_dropdown_set_options(data_source_dropdown, "mempool.space\nbitview.space");
     lv_dropdown_set_selected(data_source_dropdown, (uint16_t) chain_get_source());
@@ -1059,7 +1210,7 @@ void settings_screen_create(void)
     lv_obj_align(currency_title, LV_ALIGN_TOP_LEFT, 392, 0);
 
     currency_dropdown = lv_dropdown_create(data_section);
-    lv_obj_set_size(currency_dropdown, 130, 34);
+    lv_obj_set_size(currency_dropdown, 130, 44);
     lv_obj_align(currency_dropdown, LV_ALIGN_TOP_LEFT, 500, -4);
     lv_dropdown_set_options(currency_dropdown, "USD\nAUD\nNZD\nGBP\nEUR\nCAD\nJPY");
     lv_dropdown_set_selected(currency_dropdown, (uint16_t) chain_get_ccy());
@@ -1071,7 +1222,7 @@ void settings_screen_create(void)
     display_control_get_config(&display_config);
 
     lv_obj_t *display_section = lv_obj_create(main_cont);
-    lv_obj_set_size(display_section, 680, 286);
+    lv_obj_set_size(display_section, 680, 300);
     lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(display_section, 0, 0);
     lv_obj_set_style_pad_all(display_section, 10, 0);
@@ -1107,7 +1258,7 @@ void settings_screen_create(void)
     lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 104);
 
     display_off_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_off_dropdown, 300, 36);
+    lv_obj_set_size(display_off_dropdown, 300, 44);
     lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 128);
     lv_dropdown_set_options(display_off_dropdown, display_time_options);
     lv_dropdown_set_selected(display_off_dropdown, display_config.off_minute / 30U);
@@ -1122,7 +1273,7 @@ void settings_screen_create(void)
     lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 104);
 
     display_on_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_on_dropdown, 300, 36);
+    lv_obj_set_size(display_on_dropdown, 300, 44);
     lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 128);
     lv_dropdown_set_options(display_on_dropdown, display_time_options);
     lv_dropdown_set_selected(display_on_dropdown, display_config.on_minute / 30U);
@@ -1137,7 +1288,7 @@ void settings_screen_create(void)
     lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 176);
 
     display_corner_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_corner_dropdown, 300, 36);
+    lv_obj_set_size(display_corner_dropdown, 300, 44);
     lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 200);
     lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
     lv_dropdown_set_selected(display_corner_dropdown,
@@ -1154,11 +1305,11 @@ void settings_screen_create(void)
     lv_obj_set_style_text_font(display_button_mode_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_width(display_button_mode_hint, 650);
     lv_label_set_long_mode(display_button_mode_hint, LV_LABEL_LONG_WRAP);
-    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 244);
+    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 254);
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
-    lv_obj_set_size(ota_section, 680, 206);
+    lv_obj_set_size(ota_section, 680, 370);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -1196,7 +1347,7 @@ void settings_screen_create(void)
     if (glass) glass_style_bar(ota_progress_bar);
 
     ota_update_btn = create_settings_button(ota_section, "CHECK FOR UPDATES", settings_ota_update_clicked, false);
-    lv_obj_set_size(ota_update_btn, 240, 36);
+    lv_obj_set_size(ota_update_btn, 240, 44);
     lv_obj_align(ota_update_btn, LV_ALIGN_TOP_LEFT, 0, 110);
 
     /* Opt in to a daily check. It only ever checks: installing stays on the
@@ -1207,6 +1358,40 @@ void settings_screen_create(void)
         lv_obj_add_state(auto_sw, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(auto_sw, settings_ota_auto_toggled, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *restore_rule = lv_obj_create(ota_section);
+    lv_obj_set_size(restore_rule, 650, 1);
+    lv_obj_align(restore_rule, LV_ALIGN_TOP_LEFT, 0, 205);
+    lv_obj_set_style_bg_color(restore_rule, COLOR_BORDER, 0);
+    lv_obj_set_style_bg_opa(restore_rule, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(restore_rule, 0, 0);
+    lv_obj_clear_flag(restore_rule, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *restore_title = lv_label_create(ota_section);
+    lv_label_set_text(restore_title, "Restore original bitaxeorg firmware");
+    lv_obj_set_style_text_color(restore_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(restore_title, &lv_font_montserrat_18, 0);
+    lv_obj_align(restore_title, LV_ALIGN_TOP_LEFT, 0, 220);
+
+    ota_restore_status_label = lv_label_create(ota_section);
+    lv_label_set_text(ota_restore_status_label, "Official release: check before restoring");
+    lv_obj_set_style_text_color(ota_restore_status_label, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(ota_restore_status_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(ota_restore_status_label, LV_ALIGN_TOP_LEFT, 0, 250);
+
+    ota_restore_btn = create_settings_button(ota_section, "CHECK OFFICIAL RELEASE",
+                                             settings_original_restore_clicked, false);
+    lv_obj_set_size(ota_restore_btn, 270, 44);
+    lv_obj_align(ota_restore_btn, LV_ALIGN_TOP_LEFT, 0, 278);
+
+    lv_obj_t *restore_hint = lv_label_create(ota_section);
+    lv_label_set_text(restore_hint,
+                      "Fetches and pins the latest official OTA image. A confirmation explains rollback compatibility before install.");
+    lv_label_set_long_mode(restore_hint, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(restore_hint, 650);
+    lv_obj_set_style_text_color(restore_hint, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(restore_hint, &lv_font_montserrat_12, 0);
+    lv_obj_align(restore_hint, LV_ALIGN_TOP_LEFT, 0, 328);
 
     // Create OTA update timer (500ms interval)
     ota_timer = lv_timer_create(ota_update_timer_cb, 500, NULL);
@@ -1244,6 +1429,9 @@ void settings_screen_create(void)
 
 void settings_screen_destroy(void)
 {
+    /* This modal increments the global overlay depth. Balance it before its
+     * parent screen is deleted during navigation or a theme/skin rebuild. */
+    settings_restore_overlay_close(NULL);
     if (display_schedule_timer) {
         lv_timer_del(display_schedule_timer);
         display_schedule_timer = NULL;
@@ -1287,6 +1475,8 @@ void settings_screen_destroy(void)
         ota_status_label = NULL;
         ota_progress_bar = NULL;
         ota_version_label = NULL;
+        ota_restore_btn = NULL;
+        ota_restore_status_label = NULL;
     }
 
     display_control_set_power_button_visible(true);

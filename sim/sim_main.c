@@ -14,8 +14,10 @@
  *           C                 commit theme (persist + repaint)
  *           N <screen>        navigate: home night block clock price mempool wifi settings
  *           K <skin>          select skin (0 classic, 1 glass); home rebuilds on next N home
- *           G <what> <val>    glass: layout 0|1, widgets <hex>, wall <i>, drawer 0|1, sheet 0..4
+ *           G <what> <val>    glass: layout 0|1, widgets <hex>, wall <i>, drawer 0|1, sheet 0..5
  *           D off | D mode <0..3>   display off / display-off button mode
+ *           U [original] <0|1> fake a fork/official release
+ *           O show|progress <n>|error <text>|hide   exercise the OTA screen
  *           R                 force full repaint
  *           Q                 quit
  */
@@ -49,7 +51,9 @@
 #include "odds.h"
 #include "payout.h"
 #include "blockfound.h"
+#include "ota_screen.h"
 void sim_ota_fake_available(bool on);
+void sim_ota_fake_original_available(bool on);
 #include "chain.h"
 #include "poolping.h"
 #include "loading.h"
@@ -321,9 +325,14 @@ static void handle_command(char *line)
         break;
     }
     case 'U':
-        /* Pretend a release is waiting, to check the badge. */
+        /* Pretend a fork or official release is waiting. Legacy `U 1` still
+         * means the fork badge; `U original 1` drives restore review. */
         lvgl_port_lock(-1);
-        sim_ota_fake_available(atoi(arg) != 0);
+        if (strncmp(arg, "original ", 9) == 0) {
+            sim_ota_fake_original_available(atoi(arg + 9) != 0);
+        } else {
+            sim_ota_fake_available(atoi(arg) != 0);
+        }
         lvgl_port_unlock();
         s_dirty = true;
         break;
@@ -336,6 +345,19 @@ static void handle_command(char *line)
         lvgl_port_unlock();
         s_dirty = true;
         break;
+
+    case 'O': {
+        /* Real OTA progress/error screen states, without writing flash. */
+        char what[16] = {0};
+        char value[96] = {0};
+        if (sscanf(arg, "%15s %95[^\n]", what, value) < 1) break;
+        if (strcmp(what, "show") == 0) ota_screen_show();
+        else if (strcmp(what, "progress") == 0) ota_screen_update_progress(atoi(value));
+        else if (strcmp(what, "error") == 0) ota_screen_show_error(value[0] ? value : "Update failed");
+        else if (strcmp(what, "hide") == 0) ota_screen_hide();
+        s_dirty = true;
+        break;
+    }
 
     case 'Z': {
         /* Time a screen change end to end: build, load, tear down the old

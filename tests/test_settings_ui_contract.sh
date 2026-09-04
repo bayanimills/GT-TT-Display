@@ -6,7 +6,7 @@ settings_file="$repo_dir/main/settings.c"
 display_file="$repo_dir/main/display_control.c"
 display_header="$repo_dir/main/display_button_visibility.h"
 
-test "$(rg -c 'style_settings_dropdown\(' "$settings_file")" -eq 5
+test "$(rg -c 'style_settings_dropdown\(' "$settings_file")" -eq 7
 if rg -q 'update_display_schedule_controls' "$settings_file"; then
     echo "schedule controls must remain editable while scheduling is disabled" >&2
     exit 1
@@ -20,20 +20,22 @@ rg -q '"Visible Upper Left\\n"' "$settings_file"
 rg -q '"Hidden Upper Right\\n"' "$settings_file"
 rg -q '"Hidden Upper Left"' "$settings_file"
 rg -q '"Hidden keeps the selected corner tappable"' "$settings_file"
-rg -Fq 'lv_obj_set_size(display_section, 680, 250)' "$settings_file"
-rg -Fq 'lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 70)' "$settings_file"
-rg -Fq 'lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 94)' "$settings_file"
-rg -Fq 'lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 70)' "$settings_file"
-rg -Fq 'lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 94)' "$settings_file"
-test "$(rg -c 'lv_obj_set_size\(display_(off|on)_dropdown, 300, 36\)' "$settings_file")" -eq 2
-rg -Fq 'lv_obj_set_size(display_corner_dropdown, 300, 36)' "$settings_file"
-rg -Fq 'lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 166)' "$settings_file"
+rg -Fq 'lv_obj_set_size(display_section, 680, 300)' "$settings_file"
+rg -Fq 'lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 104)' "$settings_file"
+rg -Fq 'lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 128)' "$settings_file"
+rg -Fq 'lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 104)' "$settings_file"
+rg -Fq 'lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 128)' "$settings_file"
+test "$(rg -c 'lv_obj_set_size\(display_(off|on)_dropdown, 300, 44\)' "$settings_file")" -eq 2
+rg -Fq 'lv_obj_set_size(display_corner_dropdown, 300, 44)' "$settings_file"
+rg -Fq 'lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 200)' "$settings_file"
 rg -Fq 'lv_obj_set_width(display_button_mode_hint, 650)' "$settings_file"
-rg -Fq 'lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 210)' "$settings_file"
+rg -Fq 'lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 254)' "$settings_file"
 rg -Fq 'lv_label_set_long_mode(display_button_mode_hint, LV_LABEL_LONG_WRAP)' "$settings_file"
-# The OTA section sits 140px lower than in PR #8 because the colour theme and
-# skin section of this fork precedes the display section.
-rg -Fq 'lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 880)' "$settings_file"
+rg -Fq 'lv_obj_set_flex_flow(main_cont, LV_FLEX_FLOW_COLUMN)' "$settings_file"
+rg -Fq 'lv_obj_set_size(ota_section, 680, 370)' "$settings_file"
+rg -Fq '"Restore original bitaxeorg firmware"' "$settings_file"
+rg -Fq 'lv_obj_set_size(ota_restore_btn, 270, 44)' "$settings_file"
+rg -Fq 'settings_show_restore_confirmation' "$settings_file"
 rg -q 'display_button_mode_from_config' "$settings_file"
 rg -q 'display_button_mode_corner' "$settings_file"
 rg -q 'display_button_mode_shows_visuals' "$settings_file"

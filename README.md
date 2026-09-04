@@ -153,6 +153,14 @@ Comprehensive configuration options:
 - **Network Config**: WiFi SSID/password setup
 - **Hardware Control**: ASIC voltage, automatic fan control
 - **System Info**: Firmware version, hardware details
+- **Firmware Channels**: check/install fork releases, or fetch and attempt an OTA restore to the latest official `bitaxeorg/BAP-GT-TOUCH` image through a separate confirmed action
+
+The official restore attempt keeps NVS settings, binds the advertised version/name,
+and verifies the release asset's size and SHA-256 before selecting the new partition
+(the merged factory image is never accepted). A device that received this fork
+as a **USB factory flash** may have a rollback-enabled bootloader that the current
+official firmware does not confirm; the on-device confirmation warns that those
+devices need the official USB factory image for a guaranteed permanent restore.
 
 ### WiFi Setup (`wifi.c`)
 Touch-optimized network configuration:
@@ -187,7 +195,11 @@ before/after images to a PR:
 ```bash
 python3 shot.py shots                      # every theme preset, home screen
 python3 shot.py shots --screen settings    # a specific screen
+python3 shot.py shots --all-screens --skin both --preset 0
 ```
+
+Saved screenshots redact the payout address and Wi-Fi identity/password fields by default.
+Use `--no-redact` only for deliberately private local diagnostics.
 
 Only the genuinely board-specific pieces are replaced: the ST7262 panel and GT911
 driver become an in-memory framebuffer, the ESP LVGL port becomes a plain tick loop,

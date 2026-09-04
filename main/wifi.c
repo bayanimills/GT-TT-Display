@@ -703,6 +703,9 @@ void wifi_screen_create(void)
     password_ta = create_input_field(config_cont, "Enter password");
     lv_obj_align(password_ta, LV_ALIGN_TOP_LEFT, 350, 25);
     if (glass) glass_style_textarea(password_ta);
+    /* Reserve the embedded eye's full 44px target so bullets and the caret do
+     * not render underneath it or turn a right-edge caret tap into a toggle. */
+    lv_obj_set_style_pad_right(password_ta, 52, LV_PART_MAIN);
     lv_textarea_set_password_mode(password_ta, true);
     if (strlen(current_wifi_info.password) > 0) {
         lv_textarea_set_text(password_ta, current_wifi_info.password);
@@ -711,8 +714,8 @@ void wifi_screen_create(void)
     
     //password toggle button - positioned inside the password field
     password_toggle_btn = lv_btn_create(config_cont);
-    lv_obj_set_size(password_toggle_btn, 30, 30);
-    lv_obj_align(password_toggle_btn, LV_ALIGN_TOP_LEFT, 615, 30);
+    lv_obj_set_size(password_toggle_btn, 44, 44);
+    lv_obj_align(password_toggle_btn, LV_ALIGN_TOP_LEFT, 608, 24);
     lv_obj_set_style_bg_opa(password_toggle_btn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(password_toggle_btn, 0, 0);
     lv_obj_set_style_shadow_width(password_toggle_btn, 0, 0);

@@ -76,6 +76,7 @@ static char current_price_status[24] = "LOADING...";
 static lv_obj_t *create_bottom_nav_btn(lv_obj_t *parent, const char *symbol, lv_event_cb_t event_cb, bool active);
 static lv_obj_t *create_bottom_nav_btn_img(lv_obj_t *parent, const lv_img_dsc_t *img_dsc, lv_event_cb_t event_cb, bool active);
 static void apply_cached_price(void);
+static void price_apply_value_label(void);
 static void price_task(void *arg);
 static bool price_fetch_once(void);
 static bool price_fetch_from_url(const char *url);
@@ -133,7 +134,7 @@ void price_currency_changed(void)
     }
     if (price_value_label)
     {
-        lv_label_set_text(price_value_label, current_price_text);
+        price_apply_value_label();
     }
     price_set_status("LOADING...");
 
@@ -300,10 +301,9 @@ void price_screen_create(void)
     lv_obj_set_style_text_font(price_prefix_label, &montserrat_140, 0);
 
     price_value_label = lv_label_create(price_value_cont);
-    lv_label_set_text(price_value_label, current_price_text);
     lv_obj_set_style_text_color(price_value_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(price_value_label, &montserrat_140, 0);
     lv_obj_set_style_text_letter_space(price_value_label, 2, 0);
+    price_apply_value_label();
 
     price_suffix_label = lv_label_create(price_value_cont);
     /* The suffix is in a font with an alphabet, so it carries the currency
@@ -402,12 +402,25 @@ static void apply_cached_price(void)
 {
     if (price_value_label)
     {
-        lv_label_set_text(price_value_label, current_price_text);
+        price_apply_value_label();
     }
     if (price_status_label)
     {
         lv_label_set_text(price_status_label, current_price_status);
     }
+}
+
+/* Large-fiat currencies (notably JPY) routinely reach eight digits. The 140px
+ * face that looks good for USD would push the value and suffix beyond the
+ * 720px glass pane, so step down before layout rather than clipping it. */
+static void price_apply_value_label(void)
+{
+    if (!price_value_label) return;
+    lv_label_set_text(price_value_label, current_price_text);
+    lv_obj_set_style_text_font(price_value_label,
+                               strlen(current_price_text) >= 8 ? &Nevan_RUS_96
+                                                                : &montserrat_140,
+                               0);
 }
 
 static bool price_fetch_once(void)
@@ -693,7 +706,7 @@ static void price_task(void *arg)
             {
                 if (price_value_label)
                 {
-                    lv_label_set_text(price_value_label, current_price_text);
+                    price_apply_value_label();
                 }
                 price_set_status("LIVE");
                 lvgl_port_unlock();

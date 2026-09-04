@@ -1,0 +1,46 @@
+name: Host UI tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  simulator-and-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install test dependency
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Build simulator
+        run: make -C sim -j2
+      - name: Run host tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -Imain \
+            tests/test_display_schedule.c main/display_schedule.c -o /tmp/schedule
+          /tmp/schedule
+          cc -std=c11 -Wall -Wextra -Werror -Imain \
+            tests/test_display_button_visibility.c main/display_button_visibility.c -o /tmp/visibility
+          /tmp/visibility
+          cc -std=c11 -Wall -Wextra -Werror -Imain \
+            tests/test_ota_release.c main/ota_release.c -o /tmp/ota_release
+          /tmp/ota_release
+          bash tests/test_settings_ui_contract.sh
+      - name: Syntax-check hardware-only updater
+        working-directory: sim
+        run: |
+          cc -std=gnu11 -fsyntax-only -DLV_CONF_INCLUDE_SIMPLE \
+            -Istubs -I../main -I../components -I../components/lvgl__lvgl \
+            -I../components/lvgl__lvgl/src \
+            ../main/ota_update.c ../main/ota_release.c
+      - name: Smoke-test redacted screenshot path
+        working-directory: sim
+        run: |
+          python3 shot.py /tmp/shots --screen payout --preset 0 --skin classic --settle 0.1
+          python3 shot.py /tmp/shots --screen home --preset 0 --skin classic \
+            --cmd "O show" --cmd "O error smoke" --cmd "O hide" \
+            --name ota-return --settle 0.1

@@ -53,6 +53,16 @@ static pool_info_t current_pool_info = {
 
 static void hardware_popup_close_clicked(lv_event_t *e);
 static void pool_popup_close_clicked(lv_event_t *e);
+
+static void private_id_summary(const char *value, char *out, size_t out_n)
+{
+    size_t len = value ? strlen(value) : 0;
+    if (len <= 22) {
+        snprintf(out, out_n, "%s", value ? value : "");
+    } else {
+        snprintf(out, out_n, "%.10s...%s", value, value + len - 8);
+    }
+}
 static void apply_cached_home_values(void);
 
 static lv_obj_t *create_nav_button(lv_obj_t *parent, const char *text, lv_event_cb_t event_cb)
@@ -119,7 +129,7 @@ static void create_hardware_popup(void)
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
     lv_obj_t *close_btn = lv_btn_create(popup_cont);
-    lv_obj_set_size(close_btn, 40, 40);
+    lv_obj_set_size(close_btn, 48, 48);
     lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_set_style_bg_color(close_btn, COLOR_CARD_BG, 0);
     lv_obj_set_style_bg_opa(close_btn, LV_OPA_COVER, 0);
@@ -206,7 +216,7 @@ static void create_pool_popup(void)
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
     lv_obj_t *close_btn = lv_btn_create(popup_cont);
-    lv_obj_set_size(close_btn, 40, 40);
+    lv_obj_set_size(close_btn, 48, 48);
     lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_set_style_bg_color(close_btn, COLOR_CARD_BG, 0);
     lv_obj_set_style_bg_opa(close_btn, LV_OPA_COVER, 0);
@@ -231,10 +241,12 @@ static void create_pool_popup(void)
 
     char buffer[128];
     const char *labels[] = {"URL", "Port", "User"};
+    char worker_summary[32];
+    private_id_summary(current_pool_info.worker_name, worker_summary, sizeof(worker_summary));
     const char *values[] = {
         current_pool_info.url,
         current_pool_info.port,
-        current_pool_info.worker_name};
+        worker_summary};
 
     int y_offset = 0;
     for (int i = 0; i < 3; i++)

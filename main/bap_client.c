@@ -217,7 +217,7 @@ esp_err_t bap_client_send_ssid(const char *ssid) {
         return ret;
     }
     
-    ESP_LOGI(TAG, "Sent SSID setting: %s", message);
+    ESP_LOGI(TAG, "Sent SSID setting (redacted)");
     return ESP_OK;
 }
 
@@ -239,7 +239,7 @@ esp_err_t bap_client_send_password(const char *password) {
         return ret;
     }
     
-    ESP_LOGI(TAG, "Sent password setting: %s", message);
+    ESP_LOGI(TAG, "Sent password setting (redacted)");
     return ESP_OK;
 }
 

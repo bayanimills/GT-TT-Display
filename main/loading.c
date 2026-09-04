@@ -97,7 +97,7 @@ static void loading_timer_cb(lv_timer_t *timer)
     lv_bar_set_value(progress_bar, progress_value, LV_ANIM_ON);
 
     char buffer[32];
-    lv_snprintf(buffer, sizeof(buffer), "Hacking the Planet... %d%%", progress_value);
+    lv_snprintf(buffer, sizeof(buffer), "Starting display... %d%%", progress_value);
     lv_label_set_text(loading_label, buffer);
 
     // If loading is complete, transition to dashboard

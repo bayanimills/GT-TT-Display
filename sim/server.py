@@ -340,7 +340,8 @@ def serve(bind, port):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8010)
-    ap.add_argument("--bind", default="0.0.0.0")
+    ap.add_argument("--bind", default="127.0.0.1",
+                    help="listen address (default: loopback only; use 0.0.0.0 deliberately for LAN access)")
     ap.add_argument("--binary", default=os.path.join(HERE, "gtsim"))
     ap.add_argument("--live", default="", help="Bitaxe host/IP to mirror over BAP")
     args = ap.parse_args()

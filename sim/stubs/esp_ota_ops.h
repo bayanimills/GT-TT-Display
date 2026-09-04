@@ -10,6 +10,7 @@
  * esp_app_get_description() stays inline and real, because the simulator does
  * link that one: the settings screen prints the running version. */
 #include "esp_err.h"
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct { char version[32]; char project_name[32]; } esp_app_desc_t;
@@ -33,6 +34,9 @@ typedef enum {
 } esp_ota_img_states_t;
 
 const esp_partition_t *esp_ota_get_running_partition(void);
+const esp_partition_t *esp_ota_get_next_update_partition(const esp_partition_t *start_from);
+esp_err_t esp_partition_read(const esp_partition_t *partition, size_t src_offset,
+                             void *dst, size_t size);
 esp_err_t esp_ota_get_state_partition(const esp_partition_t *partition,
                                       esp_ota_img_states_t *ota_state);
 esp_err_t esp_ota_mark_app_valid_cancel_rollback(void);

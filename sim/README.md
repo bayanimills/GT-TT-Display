@@ -47,10 +47,22 @@ forwards `localhost`, so the browser on Windows reaches it directly.)
 python3 shot.py shots                       # every preset, home screen
 python3 shot.py shots --screen settings     # a specific screen
 python3 shot.py shots --preset 2            # one preset
+python3 shot.py shots --all-screens --preset 0 --skin both
 ```
 
 Useful for eyeballing a palette across screens, or attaching before/after
-images to a PR.
+images to a PR. `--all-screens` walks every entry in the simulator's screen
+list without restarting it; `--skin classic|glass|both` makes review sets
+deterministic instead of depending on persisted simulator preferences.
+
+Review screenshots are privacy-safe by default: the payout address and the
+Wi-Fi SSID/IP/password fields are visibly redacted before PNG encoding. The values in
+`WARMUP` remain documentation-only examples, not real credentials. Use the
+clearly unsafe `--no-redact` opt-out only when an unredacted local capture is
+actually required. For a popup, scan list, or state reached by touch/drag, add
+one or more explicit masks such as `--redact 120,90,680,180` or scope one as
+`--redact wifi:120,90,680,180`; touch destinations cannot be inferred safely.
+Explicit skin names are included in batch filenames.
 
 ## How it works
 
@@ -75,7 +87,7 @@ they never reimplement UI behaviour.
 ### Excluded from the build
 
 `main.c`, `lvgl_port.c`, `waveshare_rgb_lcd_port.c`, `ota_update.c`,
-`ota_screen.c`, `bap_uart.c`, `bap_client.c`, and
+`bap_uart.c`, `bap_client.c`, and
 `assets/logo_background.c` (which `loading.c` `#include`s directly).
 
 ### Command protocol
@@ -94,6 +106,9 @@ G <what> <value>    glass skin: layout 0|1, widgets <hexmask>, wall <index>,
                     5 also opens style), scroll <px>
 N <screen>          home night block clock price mempool wifi settings odds
 D off | D mode <n>  display off (as the corner control); button mode 0..3
+U [original] <0|1>  fake an available fork/official release
+O show | O progress <n> | O error <text> | O hide
+                    render OTA progress and failure states without flashing
 F [height]          force the block found screen
 M <frames>          time full repaints of the active screen
 Z <screen> [n]      time a full screen change, the spike navigation costs
