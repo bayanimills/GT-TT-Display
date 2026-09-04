@@ -3,6 +3,7 @@
 #include "theme.h"
 #include "settings.h"
 #include "chain.h"
+#include "poolping.h"
 #include "ota_update.h"
 #include "display_control.h"
 
@@ -49,6 +50,8 @@ void app_main()
     /* Opt-in, and only ever a check: the install stays behind the button
      * in settings. Does nothing while the setting is off. */
     ota_update_start_auto_check();
+
+    poolping_start();
 
     ESP_LOGI(TAG, "BAP Touch Display -- Build by WantClue with Love");
     ESP_LOGI(TAG, "theme: %s", theme_get_name());

@@ -416,6 +416,14 @@ esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *r)
 }
 esp_err_t esp_wifi_set_ps(wifi_ps_type_t t) { (void) t; return ESP_OK; }
 
+/* Monotonic microseconds, same contract as the ESP-IDF one. */
+int64_t esp_timer_get_time(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t) ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
 /* ---------------- HTTP client (shells out to curl) ---------------- */
 
 /* On the device, using a socket before esp_netif_init() does not return an

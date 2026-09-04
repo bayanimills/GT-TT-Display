@@ -51,6 +51,7 @@
 #include "blockfound.h"
 void sim_ota_fake_available(bool on);
 #include "chain.h"
+#include "poolping.h"
 #include "loading.h"
 #include "bap_parser.h"
 #include "display_control.h"
@@ -510,6 +511,8 @@ int main(void)
     /* Boot exactly like the device does. */
     settings_initialize();
     chain_init();
+
+    poolping_start();
     if (lvgl_port_lock(-1)) {
         loading();
         display_control_init();

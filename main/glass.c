@@ -16,6 +16,7 @@
 #include "odds.h"
 #include "payout.h"
 #include "chain.h"
+#include "poolping.h"
 #include "ota_update.h"
 #include "display_control.h"
 #include "esp_heap_caps.h"
@@ -2070,61 +2071,128 @@ static void build_wallpaper_sheet(void)
     lv_obj_set_pos(hint, 30, 366);
 }
 
+/* Live latency rows, refreshed while the sheet is open. */
+static lv_obj_t   *s_pool_rows[8];
+static lv_timer_t *s_pool_timer = NULL;
+
+static void pool_rows_refresh(void)
+{
+    const int n = poolping_count();
+    for (int rank = 0; rank < n && rank < 8; rank++) {
+        if (!s_pool_rows[rank]) continue;
+
+        const int idx = poolping_ranked(rank);
+        const pool_entry_t *e = poolping_entry(idx);
+        const int ms = poolping_latency_ms(idx);
+        if (!e) continue;
+
+        char right[24];
+        if (ms == POOLPING_PENDING)      snprintf(right, sizeof(right), "...");
+        else if (ms == POOLPING_FAILED)  snprintf(right, sizeof(right), "no reply");
+        else                             snprintf(right, sizeof(right), "%d ms", ms);
+
+        lv_obj_t *name = lv_obj_get_child(s_pool_rows[rank], 0);
+        lv_obj_t *val  = lv_obj_get_child(s_pool_rows[rank], 1);
+        if (name) lv_label_set_text(name, e->label);
+        if (val)  lv_label_set_text(val, right);
+    }
+}
+
+static void pool_timer_cb(lv_timer_t *t)
+{
+    (void) t;
+    pool_rows_refresh();
+}
+
 static void build_pool_sheet(void)
 {
     const home_stats_t *st = home_stats();
-    lv_obj_t *p = sheet_frame(660, 340, "Pool");
+    lv_obj_t *p = sheet_frame(720, 448, "Pool");
 
-    char buf[160];
-    const char *labels[3] = { "URL", "Port", "Worker" };
-    const char *values[3] = { st->pool->url, st->pool->port, st->pool->worker_name };
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *k = glass_caption(p, labels[i]);
-        lv_obj_set_pos(k, 30, 78 + i * 62);
-        snprintf(buf, sizeof(buf), "%s", nz(values[i], "--"));
-        lv_obj_t *v = glass_label(p, buf, &lv_font_montserrat_20, LV_OPA_COVER);
-        lv_obj_set_width(v, 360);
-        lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
-        lv_obj_set_pos(v, 30, 98 + i * 62);
-    }
+    /* Left: what the miner is actually on, and the way to change it. The
+     * display cannot: BAP has no pool parameter, so pool, port and user are
+     * reported and never set. The QR goes to the AxeOS page that can. */
+    lv_obj_t *cur = glass_caption(p, "CURRENT");
+    lv_obj_set_pos(cur, 28, 62);
+
+    lv_obj_t *url = glass_label(p, nz(st->pool->url, "--"), &lv_font_montserrat_22, LV_OPA_COVER);
+    lv_obj_set_width(url, 300);
+    lv_label_set_long_mode(url, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(url, 28, 84);
+
+    char portbuf[32];
+    snprintf(portbuf, sizeof(portbuf), "port %s", nz(st->pool->port, "--"));
+    lv_obj_t *port = glass_label(p, portbuf, &lv_font_montserrat_16, CAPTION_OPA);
+    lv_obj_set_pos(port, 28, 116);
+
+    /* The pool user is deliberately absent. On a solo pool it is the payout
+     * address, and this sheet faces a room. */
 
     const char *ip = wifi_get_current_ip();
-    bool ip_ok = ip && ip[0] && strcmp(ip, "0.0.0.0") != 0;
+    const bool ip_ok = ip && ip[0] && strcmp(ip, "0.0.0.0") != 0;
     lv_obj_t *qr_bg = lv_obj_create(p);
-    lv_obj_set_size(qr_bg, 176, 176);
-    lv_obj_align(qr_bg, LV_ALIGN_TOP_RIGHT, -30, 70);
-    lv_obj_set_style_radius(qr_bg, 16, 0);
+    lv_obj_set_size(qr_bg, 150, 150);
+    lv_obj_set_pos(qr_bg, 28, 158);
+    lv_obj_set_style_radius(qr_bg, 14, 0);
     lv_obj_set_style_bg_color(qr_bg, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(qr_bg, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(qr_bg, 0, 0);
     lv_obj_set_style_pad_all(qr_bg, 0, 0);
     lv_obj_clear_flag(qr_bg, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     if (ip_ok) {
-        char url[96];
-        snprintf(url, sizeof(url), "http://%s/#/pool", ip);
-        lv_obj_t *qr = lv_qrcode_create(qr_bg, 150, lv_color_black(), lv_color_white());
-        lv_qrcode_update(qr, url, strlen(url));
+        char u[96];
+        snprintf(u, sizeof(u), "http://%s/#/pool", ip);
+        lv_obj_t *qr = lv_qrcode_create(qr_bg, 128, lv_color_black(), lv_color_white());
+        lv_qrcode_update(qr, u, strlen(u));
         lv_obj_center(qr);
     } else {
-        /* Black on the white QR box, deliberately outside the material walk. */
         lv_obj_t *l = lv_label_create(qr_bg);
         lv_label_set_text(l, "No IP yet");
         lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(l, lv_color_hex(0x000000), 0);
         lv_obj_center(l);
     }
-    lv_obj_t *hint = glass_caption(p, ip_ok ? "Scan to open AxeOS" : "Connect Wi-Fi for a setup QR");
+    lv_obj_t *hint = glass_caption(p, ip_ok ? "Scan to change it in AxeOS"
+                                            : "Connect Wi-Fi for a setup QR");
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
-    lv_obj_set_width(hint, 200);
-    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -18, 254);
-    if (ip_ok) {
-        lv_obj_t *ipl = glass_label(p, ip, &lv_font_montserrat_16, LV_OPA_COVER);
-        lv_obj_set_user_data(ipl, MARK_ACCENT);
-        lv_obj_set_width(ipl, 200);
-        lv_obj_set_style_text_align(ipl, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(ipl, LV_ALIGN_TOP_RIGHT, -18, 276);
+    lv_obj_set_width(hint, 190);
+    lv_obj_set_pos(hint, 28, 314);
+
+    /* Right: how far away each known pool is, fastest first. */
+    lv_obj_t *lat = glass_caption(p, "LATENCY, FASTEST FIRST");
+    lv_obj_set_pos(lat, 360, 62);
+
+    memset(s_pool_rows, 0, sizeof(s_pool_rows));
+    const int n = poolping_count();
+    for (int rank = 0; rank < n && rank < 8; rank++) {
+        lv_obj_t *row = lv_obj_create(p);
+        lv_obj_set_size(row, 332, 40);
+        lv_obj_set_pos(row, 356, 84 + rank * 44);
+        lv_obj_set_style_bg_color(row, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_10, 0);
+        lv_obj_set_style_radius(row, 10, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+        lv_obj_t *name = glass_label(row, "...", &lv_font_montserrat_16, LV_OPA_COVER);
+        lv_obj_set_width(name, 210);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_obj_align(name, LV_ALIGN_LEFT_MID, 12, 0);
+
+        lv_obj_t *val = glass_label(row, "...", &lv_font_montserrat_16, CAPTION_OPA);
+        lv_obj_align(val, LV_ALIGN_RIGHT_MID, -12, 0);
+
+        s_pool_rows[rank] = row;
     }
+
+    lv_obj_t *foot = glass_caption(p, "TCP connect to the stratum port, every 15s");
+    lv_obj_set_style_text_font(foot, &lv_font_montserrat_12, 0);
+    lv_obj_set_pos(foot, 360, 84 + n * 44 + 6);
+
+    poolping_refresh_now();
+    pool_rows_refresh();
+    s_pool_timer = lv_timer_create(pool_timer_cb, 1000, NULL);
 }
 
 void glass_sheet_open(glass_sheet_t sheet)
@@ -2160,6 +2228,11 @@ static void sheet_reset(void)
     s_sheet_panel = NULL;
     s_sheet_scrim = NULL;
     s_sheet_host  = NULL;
+    if (s_pool_timer) {
+        lv_timer_del(s_pool_timer);
+        s_pool_timer = NULL;
+    }
+    memset(s_pool_rows, 0, sizeof(s_pool_rows));
     thumbs_free();
 }
 
