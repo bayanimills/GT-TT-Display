@@ -19,11 +19,13 @@ static const char *TAG = "blockfound";
 
 #define BLOCKFOUND_NVS_NAMESPACE "gtdisplay"
 #define BLOCKFOUND_NVS_BEST      "bf_best"
+#define BLOCKFOUND_NVS_COUNT     "bf_count"
 
 static lv_obj_t *bf_screen = NULL;
 static lv_obj_t *bf_return_to = NULL;
 static double    bf_announced = 0.0;
 static bool      bf_prefs_loaded = false;
+static int32_t   bf_seen_count = -1;
 
 static char bf_height[24] = "";
 static char bf_difficulty[24] = "";
@@ -84,7 +86,53 @@ static void bf_load_prefs(void)
     {
         bf_announced = strtod(buf, NULL);
     }
+    int32_t c = 0;
+    if (nvs_get_i32(h, BLOCKFOUND_NVS_COUNT, &c) == ESP_OK) {
+        bf_seen_count = c;
+    }
     nvs_close(h);
+}
+
+static void bf_save_count(int32_t c)
+{
+    nvs_handle_t h;
+    if (nvs_open(BLOCKFOUND_NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    nvs_set_i32(h, BLOCKFOUND_NVS_COUNT, c);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+void blockfound_report_count(const char *count)
+{
+    if (!count || !count[0]) {
+        return;
+    }
+    bf_load_prefs();
+
+    const int32_t now = (int32_t) strtol(count, NULL, 10);
+    if (now < 0) {
+        return;
+    }
+
+    /* First sighting establishes the baseline. A display added to a miner
+     * that has already solved something must not announce that on plug-in. */
+    if (bf_seen_count < 0) {
+        bf_seen_count = now;
+        bf_save_count(now);
+        ESP_LOGI(TAG, "miner reports %d solved; baseline set", (int) now);
+        return;
+    }
+
+    if (now <= bf_seen_count) {
+        return;
+    }
+
+    ESP_LOGW(TAG, "miner reports a block: %d -> %d", (int) bf_seen_count, (int) now);
+    bf_seen_count = now;
+    bf_save_count(now);
+    blockfound_trigger(block_get_height_text(), NULL);
 }
 
 static void bf_save_announced(double v)

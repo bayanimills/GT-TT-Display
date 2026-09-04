@@ -8,21 +8,33 @@
  * Not reachable from the menu: it appears on its own when this miner solves a
  * block, and it is dismissed by touching it.
  *
- * How it knows. Nothing in BAP announces a solved block, so it is derived.
- * The miner reports best_difficulty, the highest share it has ever produced,
- * and chain.c knows the network difficulty. A share at or above the network
- * difficulty is a block, by definition: that is what solving one means. So
- * when best_difficulty crosses the network target, this fires.
+ * How it knows, in order of preference.
  *
- * The honest limits of that. best_difficulty is an all-time high water mark,
- * so a second block would only register if it were luckier than the first,
- * and a device whose best share predates this firmware will not re-announce
- * it. What has been celebrated is kept in NVS so the screen appears once per
- * block rather than on every boot. */
+ * The miner counts the blocks it has solved and pushes that count over BAP as
+ * "found_block" whenever it changes. That is authoritative and needs no
+ * network, so it is the primary trigger: a count above the last one seen is a
+ * block. The first count seen only sets a baseline, because a display plugged
+ * into a miner that has already solved something must not celebrate history.
+ *
+ * As a second path, a best_difficulty at or above the network difficulty is a
+ * block by definition, and catches a miner whose counter was reset. It is
+ * weaker: best_difficulty is an all time high water mark, so it cannot see a
+ * second block luckier than the first, and it needs the network difficulty to
+ * have been fetched.
+ *
+ * Both feed one announcement, and what has been announced is kept in NVS, so
+ * a block is shown once rather than on every boot. */
 
 void      blockfound_screen_create(void);
 void      blockfound_screen_destroy(void);
 lv_obj_t *blockfound_get_screen(void);
+
+/* The miner's own count of solved blocks, as pushed over BAP. This is the
+ * authoritative signal: the miner knows, and says so, without the display
+ * having to compare a best share against a network target it may not have
+ * fetched yet. A count that rises above the last one seen announces a
+ * block. The count is kept in NVS so a restart is not a celebration. */
+void blockfound_report_count(const char *count);
 
 /* Re-evaluate the telemetry and show the screen if a block has been solved
  * that has not been announced. Cheap, and safe to call whenever

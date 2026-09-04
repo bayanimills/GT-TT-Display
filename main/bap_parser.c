@@ -88,6 +88,12 @@ esp_err_t bap_handle_response(const bap_message_t *msg) {
         ret = bap_handle_pool_user_response(msg->value);
     } else if (strcmp(msg->parameter, "fan_speed") == 0) {
         ret = bap_handle_fan_rpm_response(msg->value);
+    } else if (strcmp(msg->parameter, "found_block") == 0) {
+        /* The miner's own count of blocks it has solved, pushed when it
+         * changes. Authoritative, unlike inferring one from best_difficulty
+         * against the network target. */
+        blockfound_report_count(msg->value);
+        ret = ESP_OK;
     } else if (strcmp(msg->parameter, "best_difficulty") == 0) {
         ret = bap_handle_best_difficulty_response(msg->value);
     } else if (strcmp(msg->parameter, "voltage") == 0) {

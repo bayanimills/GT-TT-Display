@@ -29,6 +29,7 @@ static bool subscribed_shares = false;
 static bool subscribed_best_difficulty = false;
 static bool subscribed_wifi = false;
 static bool subscribed_block_height = false;
+static bool subscribed_found_block = false;
 static bool subscribed_wifi_password = false;
 static uint32_t last_response_time = 0;
 
@@ -253,6 +254,7 @@ void bap_client_reset_connection_state(void) {
     subscriptions_sent = false;
     system_info_requested = false;
     subscribed_hashrate = false;
+    subscribed_found_block = false;
     subscribed_temperature = false;
     subscribed_power = false;
     subscribed_fan_rpm = false;
@@ -316,6 +318,20 @@ static esp_err_t bap_subscribe_block_height(void) {
     if (ret == ESP_OK) {
         subscribed_block_height = true;
         ESP_LOGI(TAG, "Subscribed to block height");
+    }
+    return ret;
+}
+
+/* The miner counts the blocks it has solved and pushes the figure whenever it
+ * changes, so the display is told rather than having to infer it. */
+static esp_err_t bap_subscribe_found_block(void) {
+    if (subscribed_found_block) {
+        return ESP_OK;
+    }
+    esp_err_t ret = bap_client_subscribe("found_block");
+    if (ret == ESP_OK) {
+        subscribed_found_block = true;
+        ESP_LOGI(TAG, "Subscribed to found block");
     }
     return ret;
 }
@@ -429,6 +445,7 @@ static void uart_send_task(void *pvParameters) {
     bap_subscribe_wifi();
     vTaskDelay(pdMS_TO_TICKS(100));  // Wait a bit before next subscription
     bap_subscribe_block_height();
+    bap_subscribe_found_block();
     vTaskDelay(pdMS_TO_TICKS(100));  // Wait a bit before next subscription
     bap_subscribe_wifi_password();
     vTaskDelay(pdMS_TO_TICKS(100));  // Wait a bit
