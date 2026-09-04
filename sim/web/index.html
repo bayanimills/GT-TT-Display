@@ -21,7 +21,10 @@
   .wrap { display: flex; gap: 16px; padding: 16px; align-items: flex-start; flex-wrap: wrap; }
 
   .screen { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #000; }
-  canvas { display: block; width: 800px; height: 480px; cursor: crosshair; image-rendering: pixelated; }
+  canvas {
+    display: block; width: 800px; height: 480px; cursor: crosshair;
+    image-rendering: pixelated; touch-action: none;
+  }
   .screen .bar { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; padding-top: 8px; }
 
   aside { width: 340px; display: flex; flex-direction: column; gap: 14px; }
@@ -139,69 +142,170 @@
 const cv  = document.getElementById('screen');
 const ctx = cv.getContext('2d', { alpha: false });
 const img = ctx.createImageData(800, 480);
-let frameNo = 0, frames = 0, lastTick = performance.now(), fps = 0;
+const rgba = new Uint32Array(img.data.buffer);
+const rgb565 = new Uint32Array(65536);
+for (let v = 0; v < rgb565.length; v++) {
+  const r = ((v >> 11) & 0x1f) * 255 / 31;
+  const g = ((v >> 5) & 0x3f) * 255 / 63;
+  const b = (v & 0x1f) * 255 / 31;
+  // These packed words become R, G, B, A bytes in ImageData on supported
+  // desktop browsers, all of which use little-endian typed arrays.
+  rgb565[v] = r | (g << 8) | (b << 16) | 0xff000000;
+}
+let receivedFrameNo = 0, renderedFrameNo = 0, pendingFrame = null;
+let frames = 0, lastTick = performance.now(), fps = 0;
 
 function post(path, body) {
   return fetch(path, { method: 'POST', body: body === undefined ? '' : body });
 }
-const cmd = line => post('/cmd', line);
+let commandTail = Promise.resolve();
+function cmd(line) {
+  // Preserve UI command order even though ThreadingHTTPServer can service
+  // multiple fetches concurrently.
+  commandTail = commandTail.catch(() => {}).then(() => post('/cmd', line));
+  return commandTail;
+}
 
 /* ---- framebuffer stream (RGB565 -> canvas) ---- */
 async function pump() {
   for (;;) {
     try {
-      const res = await fetch('/frame?since=' + frameNo);
+      const res = await fetch('/frame?since=' + receivedFrameNo);
       if (res.status === 204) continue;
       if (!res.ok) { await new Promise(r => setTimeout(r, 500)); continue; }
-      frameNo = parseInt(res.headers.get('X-Frame') || '0', 10);
-      const px = new Uint16Array(await res.arrayBuffer());
-      const d = img.data;
-      for (let i = 0, j = 0; i < px.length; i++, j += 4) {
-        const v = px[i];
-        d[j]     = (v >> 11 & 0x1f) << 3;
-        d[j + 1] = (v >>  5 & 0x3f) << 2;
-        d[j + 2] = (v       & 0x1f) << 3;
-        d[j + 3] = 255;
+      const no = parseInt(res.headers.get('X-Frame') || '0', 10);
+      const buffer = await res.arrayBuffer();
+      if (no > receivedFrameNo) {
+        receivedFrameNo = no;
+        // Sim retains only its newest frame. Keep one browser frame pending as
+        // well, so a hidden/slow tab does not download and decode stale frames.
+        pendingFrame = { no, buffer };
+        while (pendingFrame && pendingFrame.no === no) {
+          await new Promise(requestAnimationFrame);
+        }
       }
-      ctx.putImageData(img, 0, 0);
-      frames++;
-      const now = performance.now();
-      if (now - lastTick > 1000) {
-        fps = frames / ((now - lastTick) / 1000);
-        frames = 0; lastTick = now;
-      }
-      document.getElementById('stat').textContent =
-        'frame ' + frameNo + ' · ' + fps.toFixed(1) + ' fps';
     } catch (e) {
       await new Promise(r => setTimeout(r, 800));
     }
   }
 }
 
+function paint() {
+  if (pendingFrame) {
+    const next = pendingFrame;
+    pendingFrame = null;
+    const px = new Uint16Array(next.buffer);
+    const n = Math.min(px.length, rgba.length);
+    for (let i = 0; i < n; i++) rgba[i] = rgb565[px[i]];
+    ctx.putImageData(img, 0, 0);
+    renderedFrameNo = next.no;
+    frames++;
+    const now = performance.now();
+    if (now - lastTick > 1000) {
+      fps = frames / ((now - lastTick) / 1000);
+      frames = 0; lastTick = now;
+    }
+    document.getElementById('stat').textContent =
+      'frame ' + renderedFrameNo + ' \u00b7 ' + fps.toFixed(1) + ' fps';
+  }
+  requestAnimationFrame(paint);
+}
+
 /* ---- touch ---- */
 function at(e) {
   const r = cv.getBoundingClientRect();
   return [
-    Math.round((e.clientX - r.left) * cv.width  / r.width),
-    Math.round((e.clientY - r.top)  * cv.height / r.height),
+    Math.max(0, Math.min(cv.width - 1,
+      Math.round((e.clientX - r.left) * cv.width / r.width))),
+    Math.max(0, Math.min(cv.height - 1,
+      Math.round((e.clientY - r.top) * cv.height / r.height))),
   ];
 }
-let down = false;
+
+let pointerId = null;
+let lastPoint = [0, 0];
+let pendingMove = null;
+let touchQueue = [];
+let touchSending = false;
+
+async function drainTouch() {
+  if (touchSending) return;
+  touchSending = true;
+  try {
+    while (touchQueue.length || pendingMove) {
+      let event;
+      if (touchQueue.length) {
+        event = touchQueue.shift();
+      } else {
+        event = pendingMove;
+        pendingMove = null;
+      }
+      try { await cmd(event.line); }
+      catch (e) { /* server restarting */ }
+      // gtsim samples touch state on its LVGL tick. Keep edges/moves observable
+      // instead of writing press and release into stdin back-to-back.
+      if (event.observe) {
+        await new Promise(r => setTimeout(r, event.observe));
+      }
+    }
+  } finally {
+    touchSending = false;
+    // A pointer event can land between the loop condition and finally.
+    if (touchQueue.length || pendingMove) drainTouch();
+  }
+}
+
+function queueTouch(line, move = false) {
+  // Both press and release edges need a sampling interval. Without the
+  // release delay, a rapid second press can reach stdin before LVGL has ever
+  // observed the first gesture ending.
+  const event = { line, observe: move ? 16 : 20 };
+  if (move) {
+    // Keep only the newest move while an HTTP request is in flight.
+    pendingMove = event;
+  } else {
+    // A release must follow the last known position, never overtake it.
+    if (pendingMove) {
+      touchQueue.push(pendingMove);
+      pendingMove = null;
+    }
+    touchQueue.push(event);
+  }
+  drainTouch();
+}
+
 cv.addEventListener('pointerdown', e => {
-  down = true; cv.setPointerCapture(e.pointerId);
-  const [x, y] = at(e); cmd(`T ${x} ${y} 1`);
+  if (pointerId !== null) return;
+  e.preventDefault();
+  pointerId = e.pointerId;
+  cv.setPointerCapture(e.pointerId);
+  lastPoint = at(e);
+  queueTouch(`T ${lastPoint[0]} ${lastPoint[1]} 1`);
 });
 cv.addEventListener('pointermove', e => {
-  if (!down) return;
-  const [x, y] = at(e); cmd(`T ${x} ${y} 1`);
+  if (e.pointerId !== pointerId) return;
+  e.preventDefault();
+  const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  lastPoint = at(events[events.length - 1]);
+  queueTouch(`T ${lastPoint[0]} ${lastPoint[1]} 1`, true);
 });
 const release = e => {
-  if (!down) return;
-  down = false;
-  const [x, y] = at(e); cmd(`T ${x} ${y} 0`);
+  if (e.pointerId !== pointerId) return;
+  e.preventDefault();
+  if (e.type !== 'pointercancel' && e.type !== 'lostpointercapture') {
+    lastPoint = at(e);
+  }
+  queueTouch(`T ${lastPoint[0]} ${lastPoint[1]} 0`);
+  pointerId = null;
 };
 cv.addEventListener('pointerup', release);
 cv.addEventListener('pointercancel', release);
+cv.addEventListener('lostpointercapture', release);
+window.addEventListener('blur', () => {
+  if (pointerId === null) return;
+  queueTouch(`T ${lastPoint[0]} ${lastPoint[1]} 0`);
+  pointerId = null;
+});
 
 /* ---- controls ---- */
 let presetIdx = 0;
@@ -221,6 +325,33 @@ function buildPresets(names) {
   });
 }
 
+const palettePending = new Map();
+let paletteTimer = null;
+let paletteSending = false;
+
+function queuePalette(slot, value) {
+  palettePending.set(slot, value);
+  if (paletteTimer === null && !paletteSending) {
+    paletteTimer = setTimeout(flushPalette, 32);
+  }
+}
+
+async function flushPalette() {
+  paletteTimer = null;
+  if (paletteSending || !palettePending.size) return;
+  paletteSending = true;
+  const changes = [...palettePending];
+  palettePending.clear();
+  const body = changes.map(([slot, value]) => `S ${slot} ${value}`).join('\n') + '\nC';
+  try { await cmd(body); }
+  finally {
+    paletteSending = false;
+    if (palettePending.size && paletteTimer === null) {
+      paletteTimer = setTimeout(flushPalette, 32);
+    }
+  }
+}
+
 function buildSlots(names) {
   const box = document.getElementById('slots');
   box.innerHTML = '';
@@ -232,7 +363,7 @@ function buildSlots(names) {
     const hex = document.createElement('code'); hex.textContent = '';
     inp.oninput = () => {
       hex.textContent = inp.value.toUpperCase();
-      cmd(`S ${i} ${inp.value.slice(1)}\nC`);
+      queuePalette(i, inp.value.slice(1));
     };
     row.append(lab, hex, inp);
     box.appendChild(row);
@@ -289,6 +420,7 @@ async function poll() {
   }
 }
 
+paint();
 pump();
 poll();
 </script>

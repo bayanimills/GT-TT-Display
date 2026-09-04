@@ -124,6 +124,8 @@ typedef struct {
     int       last_x, last_y;      /* where the material was last sampled */
     int       off_x, off_y;        /* crop offset currently applied */
     uint8_t   mat_bucket;          /* 0 = never applied */
+    lv_opa_t  frost_opa;           /* restored after low-cost scroll mode */
+    bool      frost_suspended;
     material_t mat;
 } frost_ref_t;
 
@@ -200,9 +202,13 @@ static int         s_card_count = 0;
 static frost_ref_t *s_frost = NULL;
 static int          s_frost_count = 0;
 static int          s_frost_cap = 0;
-static lv_timer_t  *s_frost_frame_timer = NULL;
-static bool         s_frost_sync_pending = false;
-static bool         s_frost_timer_running = false;
+static lv_timer_t  *s_frost_settle_timer = NULL;
+
+/* Keep translucent wallpaper crops out of the render path while a finger or
+ * momentum is moving a surface. Two display frames without a scroll event is
+ * short enough to feel immediate, but long enough not to flicker at the tail
+ * of LVGL's inertial scrolling. */
+#define FROST_SCROLL_SETTLE_MS 50
 
 static uint32_t       s_mask   = DEFAULT_MASK;
 static uint8_t        s_order[GLASS_WIDGET_COUNT];   /* widget ids, display order */
@@ -234,7 +240,7 @@ static const icon_choice_t k_icon_choices[] = {
 static void build_grid(void);
 static void rebuild_grid_async(void *unused);
 static void frost_sync(void);
-static void frost_frame_timer_cb(lv_timer_t *timer);
+static void frost_settle_timer_cb(lv_timer_t *timer);
 static void drawer_toggle_cb(lv_event_t *e);
 static void drawer_reset(void);
 static void sheet_reset(void);
@@ -588,32 +594,87 @@ static void frost_sync(void)
     }
 }
 
-static void frost_frame_timer_cb(lv_timer_t *timer)
+static bool frost_is_scroller_descendant(lv_obj_t *obj, lv_obj_t *scroller)
 {
-    if (!s_frost_sync_pending) {
-        s_frost_timer_running = false;
-        lv_timer_pause(timer);
-        return;
+    while (obj) {
+        if (obj == scroller) return true;
+        obj = lv_obj_get_parent(obj);
     }
-    s_frost_sync_pending = false;
+    return false;
+}
+
+static void frost_scroll_suspend(lv_obj_t *scroller)
+{
+    for (int i = 0; i < s_frost_count; i++) {
+        frost_ref_t *r = &s_frost[i];
+        if (!r->frost || r->frost_suspended ||
+            !frost_is_scroller_descendant(r->panel, scroller)) continue;
+        r->frost_opa = lv_obj_get_style_img_opa(r->frost, LV_PART_MAIN);
+        r->frost_suspended = true;
+        lv_obj_set_style_img_opa(r->frost, LV_OPA_TRANSP, LV_PART_MAIN);
+    }
+}
+
+static void frost_scroll_restore(void)
+{
+    bool any = false;
+    for (int i = 0; i < s_frost_count; i++) {
+        if (s_frost[i].frost && s_frost[i].frost_suspended) {
+            any = true;
+            break;
+        }
+    }
+    if (!any) return;
+
+    /* Re-aim hidden crops first so the next draw only ever exposes the final,
+     * correct part of the wallpaper. */
     frost_sync();
+    for (int i = 0; i < s_frost_count; i++) {
+        frost_ref_t *r = &s_frost[i];
+        if (!r->frost || !r->frost_suspended) continue;
+        r->frost_suspended = false;
+        lv_obj_set_style_img_opa(r->frost, r->frost_opa, LV_PART_MAIN);
+    }
+}
+
+static void frost_scroll_finish(void)
+{
+    if (s_frost_settle_timer) {
+        lv_timer_t *timer = s_frost_settle_timer;
+        s_frost_settle_timer = NULL;
+        lv_timer_del(timer);
+    }
+    frost_scroll_restore();
+}
+
+static void frost_settle_timer_cb(lv_timer_t *timer)
+{
+    /* A self-deleting one-shot cannot retain module state or an object after a
+     * screen is destroyed. Frost entries unregister with their panels. */
+    s_frost_settle_timer = NULL;
+    lv_timer_del(timer);
+    frost_scroll_restore();
 }
 
 static void scroll_sync_cb(lv_event_t *e)
 {
-    (void) e;
-    /* A finger drag can emit several scroll events between panel refreshes.
-     * Re-aiming every frost crop for each event makes the UI thread do work
-     * that can never reach the 39 Hz panel. Coalesce it to one pass per
-     * display frame instead; the maximum visual lag is a single frame. */
-    s_frost_sync_pending = true;
-    if (!s_frost_frame_timer) {
-        s_frost_frame_timer = lv_timer_create(frost_frame_timer_cb, 25, NULL);
-        s_frost_timer_running = true;
-    } else if (!s_frost_timer_running) {
-        s_frost_timer_running = true;
-        lv_timer_reset(s_frost_frame_timer);
-        lv_timer_resume(s_frost_frame_timer);
+    lv_obj_t *target = lv_event_get_current_target(e);
+    /* Only panes inside the moving container enter flat-glass mode. A narrow
+     * horizontal row must not make stationary panes elsewhere on the screen
+     * flash flat. */
+    frost_scroll_suspend(target);
+
+    if (!s_frost_settle_timer) {
+        s_frost_settle_timer = lv_timer_create(frost_settle_timer_cb,
+                                                FROST_SCROLL_SETTLE_MS, NULL);
+        if (!s_frost_settle_timer) {
+            /* Memory pressure must never leave the resting UI degraded. */
+            frost_scroll_restore();
+            return;
+        }
+    } else {
+        /* Debounce both finger movement and LVGL's momentum animation. */
+        lv_timer_reset(s_frost_settle_timer);
     }
 }
 
@@ -1481,6 +1542,10 @@ static void glass_navigate(glass_screen_t target)
 {
     if (target < 0 || target >= GLASS_SCREEN_COUNT) return;
     if (target == s_host_kind) { glass_drawer_close(); return; }
+
+    /* Leave cached screens fully rendered even if navigation lands during the
+     * tail of a scroll animation. */
+    frost_scroll_finish();
 
     /* create() is a no-op when the screen survives from a previous visit, in
      * which case the host state it would have set has to be adopted back. */
@@ -2359,6 +2424,9 @@ void glass_screen_detach(lv_obj_t *scr)
     }
 
     if (!scr) return;
+    /* Cancels the object-free settle timer before its registry entries are
+     * dropped, and restores any panes if a caller detaches before deletion. */
+    frost_scroll_finish();
     if (s_drawer_host == scr) drawer_reset();
     if (s_sheet_host == scr)  sheet_reset();
     frost_drop_host(scr);

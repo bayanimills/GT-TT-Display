@@ -16,6 +16,7 @@ import json
 import os
 import select
 import socket
+import struct
 import subprocess
 import threading
 import time
@@ -125,6 +126,9 @@ class Sim:
         self.cv = threading.Condition()
         self.log = []
         self.lock = threading.Lock()
+        # ThreadingHTTPServer, the live mirror and the seed task can all write
+        # at once. Keep complete command batches together on the sim's stdin.
+        self.input_lock = threading.Lock()
         self.proc = None
         self.start()
 
@@ -138,23 +142,36 @@ class Sim:
         threading.Thread(target=self._read_log, daemon=True).start()
 
     def _read_frames(self):
-        buf = b""
+        # bytearray avoids copying the entire partial frame on every 64 KiB
+        # pipe read. Only the latest complete framebuffer is retained.
+        buf = bytearray()
         out = self.proc.stdout
         while True:
             chunk = out.read(65536)
             if not chunk:
                 return
-            buf += chunk
+            buf.extend(chunk)
             while len(buf) >= FRAME:
                 if buf[:4] != b"GTFB":
                     idx = buf.find(b"GTFB", 1)
-                    buf = buf[idx:] if idx > 0 else b""
+                    if idx > 0:
+                        del buf[:idx]
+                    else:
+                        # Preserve a possible split magic prefix.
+                        del buf[:-3]
                     continue
+                frame_no, width, height = struct.unpack_from("<IHH", buf, 4)
+                if width != W or height != H:
+                    # A coincidental magic string in corrupt output is not a
+                    # frame boundary; advance and resume the normal resync.
+                    del buf[:4]
+                    continue
+                frame = bytes(buf[HEADER:FRAME])
+                del buf[:FRAME]
                 with self.cv:
-                    self.frame = buf[HEADER:FRAME]
-                    self.frame_no += 1
+                    self.frame = frame
+                    self.frame_no = frame_no
                     self.cv.notify_all()
-                buf = buf[FRAME:]
 
     def _read_log(self):
         for raw in iter(self.proc.stderr.readline, b""):
@@ -164,17 +181,25 @@ class Sim:
                 del self.log[:-300]
 
     def send(self, line):
-        try:
-            self.proc.stdin.write((line + "\n").encode())
-            self.proc.stdin.flush()
+        return self.send_many((line,))
+
+    def send_many(self, lines):
+        payload = "".join(line + "\n" for line in lines if line)
+        if not payload:
             return True
-        except Exception:
+        try:
+            with self.input_lock:
+                self.proc.stdin.write(payload.encode())
+                self.proc.stdin.flush()
+            return True
+        except (BrokenPipeError, OSError, ValueError):
             return False
 
     def wait_frame(self, since, timeout=8.0):
         with self.cv:
-            if self.frame_no <= since:
-                self.cv.wait(timeout)
+            self.cv.wait_for(
+                lambda: self.frame_no > since or self.proc.poll() is not None,
+                timeout)
             return self.frame_no, self.frame
 
 
@@ -202,8 +227,7 @@ class LiveMirror(threading.Thread):
                 with urllib.request.urlopen(url, timeout=6) as r:
                     info = json.loads(r.read().decode("utf-8", "replace"))
                 sentences = axeos_to_bap(info)
-                for s in sentences:
-                    self.sim.send("B " + s)
+                self.sim.send_many("B " + s for s in sentences)
                 self.status = "%s ok (%d fields)" % (self.host, len(sentences))
             except Exception as e:
                 self.status = "%s error: %s" % (self.host, e)
@@ -220,15 +244,19 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, code, body=b"", ctype="application/octet-stream", extra=None):
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
-        self.end_headers()
-        if body:
-            self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Normal when a tab closes or abandons a superseded long poll.
+            pass
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
@@ -269,15 +297,12 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(n).decode("utf-8", "replace")
 
         if self.path == "/cmd":
-            for line in body.splitlines():
-                line = line.strip()
-                if line:
-                    self.server.sim.send(line)
+            lines = [line.strip() for line in body.splitlines() if line.strip()]
+            self.server.sim.send_many(lines)
             return self._send(200, b"ok", "text/plain")
 
         if self.path == "/demo":
-            for s in DEMO:
-                self.server.sim.send("B " + s)
+            self.server.sim.send_many("B " + s for s in DEMO)
             return self._send(200, b"ok", "text/plain")
 
         if self.path == "/live":
@@ -359,8 +384,7 @@ def main():
     def seed():
         time.sleep(6)
         if not mirror.enabled:
-            for s in DEMO:
-                sim.send("B " + s)
+            sim.send_many("B " + s for s in DEMO)
     threading.Thread(target=seed, daemon=True).start()
 
     servers = serve(args.bind, args.port)
