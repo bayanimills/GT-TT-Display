@@ -200,6 +200,9 @@ static int         s_card_count = 0;
 static frost_ref_t *s_frost = NULL;
 static int          s_frost_count = 0;
 static int          s_frost_cap = 0;
+static lv_timer_t  *s_frost_frame_timer = NULL;
+static bool         s_frost_sync_pending = false;
+static bool         s_frost_timer_running = false;
 
 static uint32_t       s_mask   = DEFAULT_MASK;
 static uint8_t        s_order[GLASS_WIDGET_COUNT];   /* widget ids, display order */
@@ -231,6 +234,7 @@ static const icon_choice_t k_icon_choices[] = {
 static void build_grid(void);
 static void rebuild_grid_async(void *unused);
 static void frost_sync(void);
+static void frost_frame_timer_cb(lv_timer_t *timer);
 static void drawer_toggle_cb(lv_event_t *e);
 static void drawer_reset(void);
 static void sheet_reset(void);
@@ -584,10 +588,33 @@ static void frost_sync(void)
     }
 }
 
+static void frost_frame_timer_cb(lv_timer_t *timer)
+{
+    if (!s_frost_sync_pending) {
+        s_frost_timer_running = false;
+        lv_timer_pause(timer);
+        return;
+    }
+    s_frost_sync_pending = false;
+    frost_sync();
+}
+
 static void scroll_sync_cb(lv_event_t *e)
 {
     (void) e;
-    frost_sync();
+    /* A finger drag can emit several scroll events between panel refreshes.
+     * Re-aiming every frost crop for each event makes the UI thread do work
+     * that can never reach the 39 Hz panel. Coalesce it to one pass per
+     * display frame instead; the maximum visual lag is a single frame. */
+    s_frost_sync_pending = true;
+    if (!s_frost_frame_timer) {
+        s_frost_frame_timer = lv_timer_create(frost_frame_timer_cb, 25, NULL);
+        s_frost_timer_running = true;
+    } else if (!s_frost_timer_running) {
+        s_frost_timer_running = true;
+        lv_timer_reset(s_frost_frame_timer);
+        lv_timer_resume(s_frost_frame_timer);
+    }
 }
 
 void glass_track_scroll(lv_obj_t *obj)

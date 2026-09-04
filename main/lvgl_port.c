@@ -448,7 +448,6 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
         data->point.y = touchpad_y; // Set the Y coordinate
         /* A touch while dark wakes the display and is swallowed until release. */
         data->state = display_control_filter_touch(true) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-        ESP_LOGD(TAG, "Touch position: %d,%d", touchpad_x, touchpad_y); // Log touch position
     } else {
         display_control_filter_touch(false);
         data->state = LV_INDEV_STATE_RELEASED; // Set state to released
@@ -464,6 +463,8 @@ static lv_indev_t *indev_init(esp_lcd_touch_handle_t tp)
     /* Register a touchpad input device */
     lv_indev_drv_init(&indev_drv_tp); // Initialize the input device driver
     indev_drv_tp.type = LV_INDEV_TYPE_POINTER; // Set the device type to pointer (touchpad)
+    indev_drv_tp.scroll_limit = 8; // Begin scrolling after a short, finger-friendly drag
+    indev_drv_tp.scroll_throw = 8; // Preserve a little more momentum after release
     indev_drv_tp.read_cb = touchpad_read; // Set the read callback function
     indev_drv_tp.user_data = tp; // Set user data to the touch panel handle
 

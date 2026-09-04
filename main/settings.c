@@ -30,6 +30,8 @@ static lv_obj_t *performance_low_btn = NULL;
 static lv_obj_t *performance_medium_btn = NULL;
 static lv_obj_t *performance_high_btn = NULL;
 static lv_obj_t *auto_fan_checkbox = NULL;
+static lv_obj_t *fan_section = NULL;
+static lv_obj_t *fan_manual_cont = NULL;
 static lv_obj_t *fan_slider = NULL;
 static lv_obj_t *fan_value_label = NULL;
 static lv_obj_t *fan_save_btn = NULL;
@@ -40,10 +42,14 @@ static lv_obj_t *data_source_dropdown = NULL;
 static lv_obj_t *currency_dropdown = NULL;
 static lv_obj_t *display_schedule_checkbox = NULL;
 static lv_obj_t *display_schedule_status = NULL;
+static lv_obj_t *display_section = NULL;
+static lv_obj_t *schedule_details_cont = NULL;
 static lv_timer_t *display_schedule_timer = NULL;
 static lv_obj_t *display_off_dropdown = NULL;
 static lv_obj_t *display_on_dropdown = NULL;
+static lv_obj_t *display_corner_label = NULL;
 static lv_obj_t *display_corner_dropdown = NULL;
+static lv_obj_t *display_corner_hint = NULL;
 static lv_obj_t *theme_dropdown = NULL;
 static lv_obj_t *skin_dropdown = NULL;
 static lv_obj_t *sys_overlay = NULL;
@@ -58,6 +64,10 @@ static lv_timer_t *ota_timer = NULL;
 static lv_obj_t *ota_restore_btn = NULL;
 static lv_obj_t *ota_restore_status_label = NULL;
 static lv_obj_t *ota_restore_overlay = NULL;
+static lv_obj_t *ota_section = NULL;
+static lv_obj_t *restore_details_cont = NULL;
+static lv_obj_t *restore_disclosure_btn = NULL;
+static bool restore_details_expanded = false;
 
 static settings_info_t current_settings = {
     .performance_mode = PERFORMANCE_MEDIUM,
@@ -116,6 +126,9 @@ static void settings_ota_auto_toggled(lv_event_t *e);
 static void settings_schedule_timer_cb(lv_timer_t *t);
 static void settings_original_restore_clicked(lv_event_t *e);
 static void settings_restore_overlay_close(lv_event_t *e);
+static void settings_sync_fan_disclosure(void);
+static void settings_layout_schedule_controls(void);
+static void settings_restore_disclosure_clicked(lv_event_t *e);
 
 static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
 {
@@ -385,26 +398,42 @@ void settings_initialize(void)
     settings_initialized = true;
 }
 
+static void settings_sync_fan_disclosure(void)
+{
+    if (!fan_section || !fan_manual_cont || !fan_save_btn) {
+        return;
+    }
+
+    if (current_settings.auto_fan_control) {
+        lv_obj_add_flag(fan_manual_cont, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(fan_save_btn, LV_ALIGN_TOP_LEFT, 0, 94);
+        lv_obj_set_height(fan_section, 160);
+    } else {
+        lv_obj_clear_flag(fan_manual_cont, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(fan_save_btn, LV_ALIGN_TOP_LEFT, 0, 146);
+        lv_obj_set_height(fan_section, 210);
+    }
+
+    if (settings_main_cont) {
+        lv_obj_update_layout(settings_main_cont);
+    }
+}
+
 static void update_fan_controls(void)
 {
     if (!fan_slider || !fan_value_label)
         return;
 
+    settings_sync_fan_disclosure();
     if (current_settings.auto_fan_control)
     {
-        lv_obj_add_flag(fan_slider, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(fan_value_label, LV_OBJ_FLAG_HIDDEN);
+        return;
     }
-    else
-    {
-        lv_obj_clear_flag(fan_slider, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(fan_value_label, LV_OBJ_FLAG_HIDDEN);
 
-        lv_slider_set_value(fan_slider, current_settings.fan_speed_percent, LV_ANIM_OFF);
-        char fan_text[16];
-        snprintf(fan_text, sizeof(fan_text), "%d%%", current_settings.fan_speed_percent);
-        lv_label_set_text(fan_value_label, fan_text);
-    }
+    lv_slider_set_value(fan_slider, current_settings.fan_speed_percent, LV_ANIM_OFF);
+    char fan_text[16];
+    snprintf(fan_text, sizeof(fan_text), "%d%%", current_settings.fan_speed_percent);
+    lv_label_set_text(fan_value_label, fan_text);
 }
 
 static void decode_sys_info(char *output, size_t output_size)
@@ -721,6 +750,31 @@ static void settings_original_restore_clicked(lv_event_t *e)
     }
 }
 
+static void settings_restore_disclosure_clicked(lv_event_t *e)
+{
+    (void)e;
+    if (!ota_section || !restore_details_cont || !restore_disclosure_btn) return;
+
+    restore_details_expanded = !restore_details_expanded;
+    if (restore_details_expanded) {
+        lv_obj_clear_flag(restore_details_cont, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_height(ota_section, 456);
+    } else {
+        lv_obj_add_flag(restore_details_cont, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_height(ota_section, 306);
+    }
+
+    lv_obj_t *label = lv_obj_get_child(restore_disclosure_btn, 0);
+    if (label) {
+        lv_label_set_text(label, restore_details_expanded ? "HIDE RESTORE OPTIONS"
+                                                   : "RESTORE ORIGINAL FIRMWARE...");
+    }
+    if (settings_main_cont) lv_obj_update_layout(settings_main_cont);
+    if (restore_details_expanded) {
+        lv_obj_scroll_to_view_recursive(restore_details_cont, LV_ANIM_ON);
+    }
+}
+
 /* Newline-joined preset names for the dropdown, built once from theme.c so the
  * list can never drift out of sync with the presets themselves. */
 static const char *theme_dropdown_options(void)
@@ -842,23 +896,33 @@ static void settings_toggle_row_clicked(lv_event_t *e)
 static lv_obj_t *settings_toggle_row(lv_obj_t *parent, const char *text,
                                      int y, int w, int h, bool glass)
 {
+    if (h < 56) h = 56;
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_set_size(row, w, h);
     lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, y);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_bg_color(row, glass ? lv_color_white() : COLOR_BACKGROUND, 0);
+    lv_obj_set_style_bg_opa(row, glass ? LV_OPA_10 : LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, glass ? lv_color_white() : COLOR_BORDER, 0);
+    lv_obj_set_style_border_opa(row, glass ? LV_OPA_30 : LV_OPA_70, 0);
+    lv_obj_set_style_radius(row, 14, 0);
     lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_bg_color(row, COLOR_ACCENT, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(row, LV_OPA_20, LV_STATE_PRESSED);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
 
     lv_obj_t *label = lv_label_create(row);
     lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_16, 0);
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 2, 0);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 16, 0);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *sw = lv_switch_create(row);
-    lv_obj_set_size(sw, 52, 26);
-    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -2, 0);
+    lv_obj_set_size(sw, 58, 32);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -14, 0);
+    lv_obj_set_style_anim_time(sw, 140, LV_PART_MAIN);
     /* Without these the stock theme paints the on state its own blue, which
      * belongs to no palette we ship. */
     lv_obj_set_style_bg_color(sw, COLOR_CARD_BG, LV_PART_MAIN);
@@ -874,6 +938,28 @@ static lv_obj_t *settings_toggle_row(lv_obj_t *parent, const char *text,
         glass_style_switch(sw);
     }
     return sw;
+}
+
+/* Keep schedule times visible even while scheduling is disabled. This lets a
+ * user configure a safe window before enabling it instead of immediately
+ * applying stale/default times. */
+static void settings_layout_schedule_controls(void)
+{
+    if (!display_section || !schedule_details_cont || !display_schedule_checkbox ||
+        !display_corner_dropdown) {
+        return;
+    }
+
+    lv_obj_clear_flag(schedule_details_cont, LV_OBJ_FLAG_HIDDEN);
+    const int corner_y = 202;
+    if (display_corner_label) lv_obj_align(display_corner_label, LV_ALIGN_TOP_LEFT, 0, corner_y);
+    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, corner_y + 24);
+    if (display_corner_hint) lv_obj_align(display_corner_hint, LV_ALIGN_TOP_LEFT, 0, corner_y + 78);
+    lv_obj_set_height(display_section, 315);
+
+    if (settings_main_cont) {
+        lv_obj_update_layout(settings_main_cont);
+    }
 }
 
 void settings_screen_create(void)
@@ -902,17 +988,19 @@ void settings_screen_create(void)
         lv_obj_set_style_border_width(main_cont, 0, 0);
         lv_obj_set_style_radius(main_cont, 28, 0);
         lv_obj_set_style_pad_all(main_cont, 16, 0);
-        lv_obj_add_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE |
+                                   LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                   LV_OBJ_FLAG_SCROLL_ELASTIC);
         /* Most of settings, including the way back to Classic, is below the
          * fold: a glass scrollbar says so. */
-        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_ACTIVE);
         lv_obj_set_style_bg_color(main_cont, lv_color_white(), LV_PART_SCROLLBAR);
         lv_obj_set_style_bg_opa(main_cont, LV_OPA_40, LV_PART_SCROLLBAR);
         lv_obj_set_style_width(main_cont, 5, LV_PART_SCROLLBAR);
         lv_obj_set_style_radius(main_cont, 3, LV_PART_SCROLLBAR);
         lv_obj_set_style_pad_right(main_cont, 6, LV_PART_SCROLLBAR);
         lv_obj_set_scroll_dir(main_cont, LV_DIR_VER);
-        lv_obj_set_style_pad_bottom(main_cont, 80, 0);
+        lv_obj_set_style_pad_bottom(main_cont, 36, 0);
         glass_attach_drawer_toggle(main_cont);
     }
     else
@@ -933,10 +1021,17 @@ void settings_screen_create(void)
         lv_obj_set_style_border_opa(main_cont, LV_OPA_50, 0);
         lv_obj_set_style_radius(main_cont, 14, 0);
         lv_obj_set_style_pad_all(main_cont, 16, 0);
-        lv_obj_add_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_add_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE |
+                                   LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                   LV_OBJ_FLAG_SCROLL_ELASTIC);
+        lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_ACTIVE);
+        lv_obj_set_style_bg_color(main_cont, COLOR_TEXT_SECONDARY, LV_PART_SCROLLBAR);
+        lv_obj_set_style_bg_opa(main_cont, LV_OPA_50, LV_PART_SCROLLBAR);
+        lv_obj_set_style_width(main_cont, 5, LV_PART_SCROLLBAR);
+        lv_obj_set_style_radius(main_cont, 3, LV_PART_SCROLLBAR);
+        lv_obj_set_style_pad_right(main_cont, 6, LV_PART_SCROLLBAR);
         lv_obj_set_scroll_dir(main_cont, LV_DIR_VER);
-        lv_obj_set_style_pad_bottom(main_cont, 80, 0);
+        lv_obj_set_style_pad_bottom(main_cont, 24, 0);
     }
 
     settings_main_cont = main_cont;
@@ -948,7 +1043,7 @@ void settings_screen_create(void)
     lv_obj_set_flex_flow(main_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(main_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(main_cont, 14, 0);
+    lv_obj_set_style_pad_row(main_cont, 10, 0);
 
     lv_obj_t *title_label = lv_label_create(main_cont);
     lv_label_set_text(title_label, "SETTINGS");
@@ -991,8 +1086,8 @@ void settings_screen_create(void)
     performance_high_btn = create_settings_button(perf_btn_cont, "HIGH", settings_performance_high_clicked,
                                                   current_settings.performance_mode == PERFORMANCE_HIGH);
 
-    lv_obj_t *fan_section = lv_obj_create(main_cont);
-    lv_obj_set_size(fan_section, 680, 200);
+    fan_section = lv_obj_create(main_cont);
+    lv_obj_set_size(fan_section, 680, 210);
     lv_obj_set_style_bg_opa(fan_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(fan_section, 0, 0);
     lv_obj_set_style_pad_all(fan_section, 10, 0);
@@ -1006,7 +1101,7 @@ void settings_screen_create(void)
     lv_obj_align(fan_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     auto_fan_checkbox = settings_toggle_row(fan_section, "Automatic Fan Control",
-                                            26, 660, 40, glass);
+                                            26, 660, 56, glass);
     lv_obj_add_event_cb(auto_fan_checkbox, settings_auto_fan_toggled, LV_EVENT_VALUE_CHANGED, NULL);
 
     if (current_settings.auto_fan_control)
@@ -1014,10 +1109,21 @@ void settings_screen_create(void)
         lv_obj_add_state(auto_fan_checkbox, LV_STATE_CHECKED);
     }
 
-    fan_slider = lv_slider_create(fan_section);
+    /* Manual-only controls live in one disclosure group. Keeping the Apply
+     * button outside preserves the existing explicit-save behaviour for both
+     * automatic and manual modes. */
+    fan_manual_cont = lv_obj_create(fan_section);
+    lv_obj_set_size(fan_manual_cont, 660, 44);
+    lv_obj_align(fan_manual_cont, LV_ALIGN_TOP_LEFT, 0, 94);
+    lv_obj_set_style_bg_opa(fan_manual_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(fan_manual_cont, 0, 0);
+    lv_obj_set_style_pad_all(fan_manual_cont, 0, 0);
+    lv_obj_clear_flag(fan_manual_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    fan_slider = lv_slider_create(fan_manual_cont);
     lv_obj_set_size(fan_slider, 420, 20);
     lv_obj_set_ext_click_area(fan_slider, 12);
-    lv_obj_align(fan_slider, LV_ALIGN_TOP_LEFT, 0, 70);
+    lv_obj_align(fan_slider, LV_ALIGN_TOP_LEFT, 0, 12);
     lv_slider_set_range(fan_slider, 0, 100);
     lv_slider_set_value(fan_slider, current_settings.fan_speed_percent, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(fan_slider, COLOR_CARD_BG, LV_PART_MAIN);
@@ -1026,17 +1132,17 @@ void settings_screen_create(void)
     lv_obj_add_event_cb(fan_slider, settings_fan_slider_changed, LV_EVENT_VALUE_CHANGED, NULL);
     if (glass) glass_style_slider(fan_slider);
 
-    fan_value_label = lv_label_create(fan_section);
+    fan_value_label = lv_label_create(fan_manual_cont);
     char fan_text[16];
     snprintf(fan_text, sizeof(fan_text), "%d%%", current_settings.fan_speed_percent);
     lv_label_set_text(fan_value_label, fan_text);
     lv_obj_set_style_text_color(fan_value_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(fan_value_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(fan_value_label, LV_ALIGN_TOP_LEFT, 450, 72);
+    lv_obj_align(fan_value_label, LV_ALIGN_TOP_LEFT, 450, 14);
 
-    fan_save_btn = create_settings_button(fan_section, "SAVE FAN SETTINGS", settings_fan_save_clicked, false);
+    fan_save_btn = create_settings_button(fan_section, "APPLY FAN MODE", settings_fan_save_clicked, false);
     lv_obj_set_size(fan_save_btn, 220, 44);
-    lv_obj_align(fan_save_btn, LV_ALIGN_TOP_LEFT, 0, 115);
+    lv_obj_align(fan_save_btn, LV_ALIGN_TOP_LEFT, 0, 146);
 
     update_fan_controls();
 
@@ -1221,7 +1327,7 @@ void settings_screen_create(void)
     display_control_config_t display_config;
     display_control_get_config(&display_config);
 
-    lv_obj_t *display_section = lv_obj_create(main_cont);
+    display_section = lv_obj_create(main_cont);
     lv_obj_set_size(display_section, 680, 300);
     lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(display_section, 0, 0);
@@ -1237,59 +1343,67 @@ void settings_screen_create(void)
 
     display_schedule_checkbox = settings_toggle_row(display_section,
                                                     "Turn the display off daily",
-                                                    30, 660, 40, glass);
+                                                    30, 660, 56, glass);
 
     display_schedule_status = lv_label_create(display_section);
     lv_obj_set_style_text_color(display_schedule_status, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(display_schedule_status, &lv_font_montserrat_14, 0);
-    lv_obj_align(display_schedule_status, LV_ALIGN_TOP_LEFT, 2, 72);
+    lv_obj_align(display_schedule_status, LV_ALIGN_TOP_LEFT, 2, 94);
 
     display_schedule_timer = lv_timer_create(settings_schedule_timer_cb, 2000, NULL);
     if (display_config.schedule_enabled) {
         lv_obj_add_state(display_schedule_checkbox, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(display_schedule_checkbox, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    settings_refresh_schedule_status();
 
+    schedule_details_cont = lv_obj_create(display_section);
+    lv_obj_set_size(schedule_details_cont, 660, 68);
+    lv_obj_align(schedule_details_cont, LV_ALIGN_TOP_LEFT, 0, 122);
+    lv_obj_set_style_bg_opa(schedule_details_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(schedule_details_cont, 0, 0);
+    lv_obj_set_style_pad_all(schedule_details_cont, 0, 0);
+    lv_obj_clear_flag(schedule_details_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *off_label = lv_label_create(display_section);
+    lv_obj_t *off_label = lv_label_create(schedule_details_cont);
     lv_label_set_text(off_label, "Turns off at");
     lv_obj_set_style_text_color(off_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(off_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 104);
+    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    display_off_dropdown = lv_dropdown_create(display_section);
+    display_off_dropdown = lv_dropdown_create(schedule_details_cont);
     lv_obj_set_size(display_off_dropdown, 300, 44);
-    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 128);
+    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 24);
     lv_dropdown_set_options(display_off_dropdown, display_time_options);
     lv_dropdown_set_selected(display_off_dropdown, display_config.off_minute / 30U);
     style_settings_dropdown(display_off_dropdown, &lv_font_montserrat_14);
     lv_obj_add_event_cb(display_off_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
     if (glass) glass_style_dropdown(display_off_dropdown);
 
-    lv_obj_t *on_label = lv_label_create(display_section);
+    lv_obj_t *on_label = lv_label_create(schedule_details_cont);
     lv_label_set_text(on_label, "Turns on at");
     lv_obj_set_style_text_color(on_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(on_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 104);
+    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 0);
 
-    display_on_dropdown = lv_dropdown_create(display_section);
+    display_on_dropdown = lv_dropdown_create(schedule_details_cont);
     lv_obj_set_size(display_on_dropdown, 300, 44);
-    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 128);
+    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 24);
     lv_dropdown_set_options(display_on_dropdown, display_time_options);
     lv_dropdown_set_selected(display_on_dropdown, display_config.on_minute / 30U);
     style_settings_dropdown(display_on_dropdown, &lv_font_montserrat_14);
     lv_obj_add_event_cb(display_on_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
     if (glass) glass_style_dropdown(display_on_dropdown);
 
-    lv_obj_t *corner_label = lv_label_create(display_section);
-    lv_label_set_text(corner_label, "Display-off button");
-    lv_obj_set_style_text_color(corner_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(corner_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 176);
+    display_corner_label = lv_label_create(display_section);
+    lv_label_set_text(display_corner_label, "Display-off button");
+    lv_obj_set_style_text_color(display_corner_label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(display_corner_label, &lv_font_montserrat_16, 0);
+    lv_obj_align(display_corner_label, LV_ALIGN_TOP_LEFT, 0, 202);
 
     display_corner_dropdown = lv_dropdown_create(display_section);
     lv_obj_set_size(display_corner_dropdown, 300, 44);
-    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 200);
+    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 226);
     lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
     lv_dropdown_set_selected(display_corner_dropdown,
                              (uint16_t)display_button_mode_from_config(
@@ -1299,17 +1413,18 @@ void settings_screen_create(void)
     lv_obj_add_event_cb(display_corner_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
     if (glass) glass_style_dropdown(display_corner_dropdown);
 
-    lv_obj_t *display_button_mode_hint = lv_label_create(display_section);
-    lv_label_set_text(display_button_mode_hint, "Hidden keeps the selected corner tappable");
-    lv_obj_set_style_text_color(display_button_mode_hint, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(display_button_mode_hint, &lv_font_montserrat_14, 0);
-    lv_obj_set_width(display_button_mode_hint, 650);
-    lv_label_set_long_mode(display_button_mode_hint, LV_LABEL_LONG_WRAP);
-    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 254);
+    display_corner_hint = lv_label_create(display_section);
+    lv_label_set_text(display_corner_hint, "Hidden keeps the selected corner tappable");
+    lv_obj_set_style_text_color(display_corner_hint, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(display_corner_hint, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(display_corner_hint, 650);
+    lv_label_set_long_mode(display_corner_hint, LV_LABEL_LONG_WRAP);
+    lv_obj_align(display_corner_hint, LV_ALIGN_TOP_LEFT, 0, 280);
+    settings_layout_schedule_controls();
 
     // OTA Update Section
-    lv_obj_t *ota_section = lv_obj_create(main_cont);
-    lv_obj_set_size(ota_section, 680, 370);
+    ota_section = lv_obj_create(main_cont);
+    lv_obj_set_size(ota_section, 680, 306);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -1353,45 +1468,53 @@ void settings_screen_create(void)
     /* Opt in to a daily check. It only ever checks: installing stays on the
      * button above, so nothing arrives on this panel unattended. */
     lv_obj_t *auto_sw = settings_toggle_row(ota_section, "Check for updates daily",
-                                            156, 660, 40, glass);
+                                             164, 660, 56, glass);
     if (ota_update_get_auto_check()) {
         lv_obj_add_state(auto_sw, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(auto_sw, settings_ota_auto_toggled, LV_EVENT_VALUE_CHANGED, NULL);
 
-    lv_obj_t *restore_rule = lv_obj_create(ota_section);
-    lv_obj_set_size(restore_rule, 650, 1);
-    lv_obj_align(restore_rule, LV_ALIGN_TOP_LEFT, 0, 205);
-    lv_obj_set_style_bg_color(restore_rule, COLOR_BORDER, 0);
-    lv_obj_set_style_bg_opa(restore_rule, LV_OPA_70, 0);
-    lv_obj_set_style_border_width(restore_rule, 0, 0);
-    lv_obj_clear_flag(restore_rule, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    restore_disclosure_btn = create_settings_button(ota_section,
+                                                     "RESTORE ORIGINAL FIRMWARE...",
+                                                     settings_restore_disclosure_clicked, false);
+    lv_obj_set_size(restore_disclosure_btn, 660, 56);
+    lv_obj_align(restore_disclosure_btn, LV_ALIGN_TOP_LEFT, 0, 230);
 
-    lv_obj_t *restore_title = lv_label_create(ota_section);
+    restore_details_cont = lv_obj_create(ota_section);
+    lv_obj_set_size(restore_details_cont, 660, 140);
+    lv_obj_align(restore_details_cont, LV_ALIGN_TOP_LEFT, 0, 296);
+    lv_obj_set_style_bg_opa(restore_details_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(restore_details_cont, 0, 0);
+    lv_obj_set_style_pad_all(restore_details_cont, 0, 0);
+    lv_obj_clear_flag(restore_details_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *restore_title = lv_label_create(restore_details_cont);
     lv_label_set_text(restore_title, "Restore original bitaxeorg firmware");
     lv_obj_set_style_text_color(restore_title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(restore_title, &lv_font_montserrat_18, 0);
-    lv_obj_align(restore_title, LV_ALIGN_TOP_LEFT, 0, 220);
+    lv_obj_align(restore_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    ota_restore_status_label = lv_label_create(ota_section);
+    ota_restore_status_label = lv_label_create(restore_details_cont);
     lv_label_set_text(ota_restore_status_label, "Official release: check before restoring");
     lv_obj_set_style_text_color(ota_restore_status_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(ota_restore_status_label, &lv_font_montserrat_14, 0);
-    lv_obj_align(ota_restore_status_label, LV_ALIGN_TOP_LEFT, 0, 250);
+    lv_obj_align(ota_restore_status_label, LV_ALIGN_TOP_LEFT, 0, 28);
 
-    ota_restore_btn = create_settings_button(ota_section, "CHECK OFFICIAL RELEASE",
+    ota_restore_btn = create_settings_button(restore_details_cont, "CHECK OFFICIAL RELEASE",
                                              settings_original_restore_clicked, false);
     lv_obj_set_size(ota_restore_btn, 270, 44);
-    lv_obj_align(ota_restore_btn, LV_ALIGN_TOP_LEFT, 0, 278);
+    lv_obj_align(ota_restore_btn, LV_ALIGN_TOP_LEFT, 0, 54);
 
-    lv_obj_t *restore_hint = lv_label_create(ota_section);
+    lv_obj_t *restore_hint = lv_label_create(restore_details_cont);
     lv_label_set_text(restore_hint,
                       "Fetches and pins the latest official OTA image. A confirmation explains rollback compatibility before install.");
     lv_label_set_long_mode(restore_hint, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(restore_hint, 650);
     lv_obj_set_style_text_color(restore_hint, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(restore_hint, &lv_font_montserrat_12, 0);
-    lv_obj_align(restore_hint, LV_ALIGN_TOP_LEFT, 0, 328);
+    lv_obj_set_style_text_font(restore_hint, &lv_font_montserrat_14, 0);
+    lv_obj_align(restore_hint, LV_ALIGN_TOP_LEFT, 0, 106);
+    lv_obj_add_flag(restore_details_cont, LV_OBJ_FLAG_HIDDEN);
+    restore_details_expanded = false;
 
     // Create OTA update timer (500ms interval)
     ota_timer = lv_timer_create(ota_update_timer_cb, 500, NULL);
@@ -1460,6 +1583,8 @@ void settings_screen_destroy(void)
         performance_medium_btn = NULL;
         performance_high_btn = NULL;
         auto_fan_checkbox = NULL;
+        fan_section = NULL;
+        fan_manual_cont = NULL;
         fan_slider = NULL;
         fan_value_label = NULL;
         fan_save_btn = NULL;
@@ -1468,15 +1593,23 @@ void settings_screen_destroy(void)
         timezone_dropdown = NULL;
         theme_dropdown = NULL;
         display_schedule_checkbox = NULL;
+        display_section = NULL;
+        schedule_details_cont = NULL;
         display_off_dropdown = NULL;
         display_on_dropdown = NULL;
+        display_corner_label = NULL;
         display_corner_dropdown = NULL;
+        display_corner_hint = NULL;
         ota_update_btn = NULL;
         ota_status_label = NULL;
         ota_progress_bar = NULL;
         ota_version_label = NULL;
         ota_restore_btn = NULL;
         ota_restore_status_label = NULL;
+        ota_section = NULL;
+        restore_details_cont = NULL;
+        restore_disclosure_btn = NULL;
+        restore_details_expanded = false;
     }
 
     display_control_set_power_button_visible(true);
@@ -1598,6 +1731,9 @@ void settings_auto_fan_toggled(lv_event_t *e)
     lv_obj_t *checkbox = lv_event_get_target(e);
     current_settings.auto_fan_control = lv_obj_has_state(checkbox, LV_STATE_CHECKED);
     update_fan_controls();
+    if (!current_settings.auto_fan_control && fan_manual_cont) {
+        lv_obj_scroll_to_view_recursive(fan_manual_cont, LV_ANIM_ON);
+    }
     printf("Auto fan control: %s\n", current_settings.auto_fan_control ? "ON" : "OFF");
 }
 
@@ -1704,7 +1840,6 @@ void settings_timezone_changed(lv_event_t *e)
 
 static void settings_display_schedule_changed(lv_event_t *e)
 {
-    LV_UNUSED(e);
     if (!display_schedule_checkbox || !display_off_dropdown || !display_on_dropdown ||
         !display_corner_dropdown) {
         return;
@@ -1723,6 +1858,11 @@ static void settings_display_schedule_changed(lv_event_t *e)
 
     esp_err_t err = display_control_set_config(&config);
     settings_refresh_schedule_status();
+    settings_layout_schedule_controls();
+    if (lv_event_get_target(e) == display_schedule_checkbox && config.schedule_enabled &&
+        schedule_details_cont) {
+        lv_obj_scroll_to_view_recursive(schedule_details_cont, LV_ANIM_ON);
+    }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save display schedule: %s", esp_err_to_name(err));
     }
