@@ -6,10 +6,11 @@ settings_file="$repo_dir/main/settings.c"
 display_file="$repo_dir/main/display_control.c"
 display_header="$repo_dir/main/display_button_visibility.h"
 lvgl_port_file="$repo_dir/main/lvgl_port.c"
+glass_file="$repo_dir/main/glass.c"
 sdk_defaults="$repo_dir/sdkconfig.defaults"
 lv_conf="$repo_dir/components/lvgl__lvgl/lv_conf.h"
 
-test "$(rg -c 'style_settings_dropdown\(' "$settings_file")" -eq 7
+test "$(rg -c 'style_settings_dropdown\(' "$settings_file")" -eq 8
 rg -q 'display_control_set_power_button_visible\(false\)' "$settings_file"
 rg -q 'display_control_set_power_button_visible\(true\)' "$settings_file"
 rg -q 'DISPLAY_DEFAULT_OFF_MINUTE \(22U \* 60U\)' "$display_file"
@@ -38,7 +39,9 @@ rg -Fq 'lv_obj_add_flag(fan_manual_cont, LV_OBJ_FLAG_HIDDEN)' "$settings_file"
 rg -Fq 'restore_details_cont = lv_obj_create(ota_section)' "$settings_file"
 rg -Fq 'lv_obj_add_flag(restore_details_cont, LV_OBJ_FLAG_HIDDEN)' "$settings_file"
 test "$(rg -c 'lv_obj_scroll_to_view_recursive\(' "$settings_file")" -eq 3
-rg -Fq 'lv_obj_set_size(ota_section, 680, 306)' "$settings_file"
+rg -Fq 'lv_obj_set_size(ota_section, 680, 366)' "$settings_file"
+rg -Fq '"Include beta releases"' "$settings_file"
+rg -Fq '"Manual\nDaily\nWeekly"' "$settings_file"
 rg -Fq '"Restore original bitaxeorg firmware"' "$settings_file"
 rg -Fq 'lv_obj_set_size(ota_restore_btn, 270, 44)' "$settings_file"
 rg -Fq 'settings_show_restore_confirmation' "$settings_file"
@@ -69,5 +72,16 @@ rg -Fxq 'CONFIG_LV_INDEV_DEF_READ_PERIOD=10' "$sdk_defaults"
 rg -Fq '#define LV_DISP_DEF_REFR_PERIOD 25' "$lv_conf"
 rg -Fq '#define LV_INDEV_DEF_READ_PERIOD 10' "$lv_conf"
 rg -Fq '#define LV_USE_PERF_MONITOR 0' "$lv_conf"
+
+# Bottom navigation is tap-only. Handling GESTURE here navigates while the
+# pointer is still pressed, allowing its later click to toggle straight back.
+rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESSED, NULL)' "$glass_file"
+rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESSING, NULL)' "$glass_file"
+rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_CLICKED, NULL)' "$glass_file"
+rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESS_LOST, NULL)' "$glass_file"
+if rg -q 'lv_obj_add_event_cb\(grab_target, drawer_grabber_cb, LV_EVENT_GESTURE' "$glass_file"; then
+    echo "Glass bottom navigation must not change screens during pointer motion" >&2
+    exit 1
+fi
 
 echo "settings UI contract tests passed"

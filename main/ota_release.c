@@ -225,7 +225,7 @@ bool ota_release_parse_github(const char *json, size_t len,
     return true;
 }
 
-static bool parse_version(const char *s, unsigned long part[3])
+static bool parse_version(const char *s, unsigned long part[3], bool *prerelease)
 {
     if (!s) return false;
     if (*s == 'v' || *s == 'V') s++;
@@ -243,16 +243,21 @@ static bool parse_version(const char *s, unsigned long part[3])
             s++;
         }
     }
-    return *s == '\0' || *s == '-' || *s == '+';
+    if (*s != '\0' && *s != '-' && *s != '+') return false;
+    if (prerelease) *prerelease = *s == '-';
+    return true;
 }
 
 bool ota_release_version_is_newer(const char *latest, const char *current)
 {
     unsigned long a[3], b[3];
-    if (!parse_version(latest, a)) return false;
-    if (!parse_version(current, b)) return true;
+    bool a_pre = false, b_pre = false;
+    if (!parse_version(latest, a, &a_pre)) return false;
+    if (!parse_version(current, b, &b_pre)) return true;
     for (int i = 0; i < 3; i++) {
         if (a[i] != b[i]) return a[i] > b[i];
     }
-    return false;
+    /* For the same numeric version, the final release supersedes its beta/RC.
+     * A prerelease must never displace an already-installed final release. */
+    return b_pre && !a_pre;
 }

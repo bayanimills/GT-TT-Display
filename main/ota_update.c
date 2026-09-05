@@ -32,6 +32,7 @@ static const char *TAG = "OTA";
 #define OTA_TASK_PRIORITY 1
 #define VERSION_CHECK_STACK_SIZE 8192
 #define FORK_GITHUB_API_URL "https://api.github.com/repos/bayanimills/GT-TT-Display/releases/latest"
+#define FORK_GITHUB_BETA_API_URL "https://api.github.com/repos/bayanimills/GT-TT-Display/releases?per_page=1"
 #define ORIGINAL_GITHUB_API_URL "https://api.github.com/repos/bitaxeorg/BAP-GT-TOUCH/releases/latest"
 #define GITHUB_RESPONSE_MAX (32 * 1024)
 
@@ -40,13 +41,14 @@ static ota_info_t ota_current_info = {0};
 
 #define OTA_NVS_NAMESPACE  "gtdisplay"
 #define OTA_NVS_AUTO_CHECK "ota_auto"
-/* Once a day. Often enough to hear about a release the day it lands, rare
- * enough that the panel is not talking to GitHub for no reason. */
-#define OTA_AUTO_CHECK_INTERVAL_MS (24 * 60 * 60 * 1000)
+#define OTA_NVS_BETA       "ota_beta"
+#define OTA_NVS_FREQUENCY  "ota_freq"
 /* The first poll waits this long so it does not race the radio at boot. */
 #define OTA_AUTO_CHECK_FIRST_MS    (2 * 60 * 1000)
 
 static bool ota_auto_check_enabled = false;
+static bool ota_beta_enabled = false;
+static ota_check_frequency_t ota_check_frequency = OTA_CHECK_MANUAL;
 static bool ota_auto_check_loaded = false;
 static TaskHandle_t ota_auto_task_handle = NULL;
 /* These booleans are reservations as well as running flags. Set them while the
@@ -244,7 +246,8 @@ static void version_check_task(void *param)
 
     ota_release_t release;
     const char *friendly_error = "Release check failed";
-    esp_err_t err = fetch_github_release(FORK_GITHUB_API_URL,
+    const bool beta = ota_update_get_beta_enabled();
+    esp_err_t err = fetch_github_release(beta ? FORK_GITHUB_BETA_API_URL : FORK_GITHUB_API_URL,
                                          "bayanimills", "GT-TT-Display",
                                          &release, &friendly_error);
     if (err != ESP_OK) {
@@ -574,6 +577,18 @@ static void ota_auto_check_load(void)
     if (nvs_get_u8(h, OTA_NVS_AUTO_CHECK, &v) == ESP_OK) {
         ota_auto_check_enabled = (v != 0);
     }
+    v = 0;
+    if (nvs_get_u8(h, OTA_NVS_BETA, &v) == ESP_OK) {
+        ota_beta_enabled = (v != 0);
+    }
+    v = OTA_CHECK_MANUAL;
+    if (nvs_get_u8(h, OTA_NVS_FREQUENCY, &v) == ESP_OK && v <= OTA_CHECK_WEEKLY) {
+        ota_check_frequency = (ota_check_frequency_t)v;
+    } else if (ota_auto_check_enabled) {
+        /* Migrate the previous daily boolean without surprising its owner. */
+        ota_check_frequency = OTA_CHECK_DAILY;
+    }
+    ota_auto_check_enabled = ota_check_frequency != OTA_CHECK_MANUAL;
     nvs_close(h);
 }
 
@@ -585,24 +600,59 @@ bool ota_update_get_auto_check(void)
 
 void ota_update_set_auto_check(bool enabled)
 {
+    ota_update_set_check_frequency(enabled ? OTA_CHECK_DAILY : OTA_CHECK_MANUAL);
+}
+
+bool ota_update_get_beta_enabled(void)
+{
     ota_auto_check_load();
-    if (enabled == ota_auto_check_enabled) {
-        return;
-    }
-    ota_auto_check_enabled = enabled;
+    return ota_beta_enabled;
+}
+
+void ota_update_set_beta_enabled(bool enabled)
+{
+    ota_auto_check_load();
+    if (enabled == ota_beta_enabled) return;
+    ota_beta_enabled = enabled;
 
     nvs_handle_t h;
     if (nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_u8(h, OTA_NVS_AUTO_CHECK, enabled ? 1 : 0);
+        nvs_set_u8(h, OTA_NVS_BETA, enabled ? 1 : 0);
         nvs_commit(h);
         nvs_close(h);
     }
-    ESP_LOGI(TAG, "daily update check %s", enabled ? "on" : "off");
+    ESP_LOGI(TAG, "firmware channel: %s", enabled ? "beta" : "stable");
+    if (ota_auto_task_handle) xTaskNotifyGive(ota_auto_task_handle);
+}
 
-    /* Turning it on should tell you something today, not tomorrow. */
-    if (enabled && ota_auto_task_handle) {
-        xTaskNotifyGive(ota_auto_task_handle);
+ota_check_frequency_t ota_update_get_check_frequency(void)
+{
+    ota_auto_check_load();
+    return ota_check_frequency;
+}
+
+void ota_update_set_check_frequency(ota_check_frequency_t frequency)
+{
+    ota_auto_check_load();
+    if (frequency < OTA_CHECK_MANUAL || frequency > OTA_CHECK_WEEKLY) {
+        frequency = OTA_CHECK_MANUAL;
     }
+    if (frequency == ota_check_frequency) return;
+    ota_check_frequency = frequency;
+    ota_auto_check_enabled = frequency != OTA_CHECK_MANUAL;
+
+    nvs_handle_t h;
+    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, OTA_NVS_FREQUENCY, (uint8_t)frequency);
+        nvs_set_u8(h, OTA_NVS_AUTO_CHECK, ota_auto_check_enabled ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    const char *name = frequency == OTA_CHECK_DAILY ? "daily" :
+                       frequency == OTA_CHECK_WEEKLY ? "weekly" : "manual";
+    ESP_LOGI(TAG, "automatic update check: %s", name);
+
+    if (ota_auto_task_handle) xTaskNotifyGive(ota_auto_task_handle);
 }
 
 bool ota_update_available(void)
@@ -622,7 +672,10 @@ static void ota_auto_check_task(void *arg)
 
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
-        wait_ms = OTA_AUTO_CHECK_INTERVAL_MS;
+        ota_check_frequency_t frequency = ota_update_get_check_frequency();
+        wait_ms = frequency == OTA_CHECK_WEEKLY
+                      ? 7U * 24U * 60U * 60U * 1000U
+                      : 24U * 60U * 60U * 1000U;
 
         if (!ota_update_get_auto_check()) {
             continue;
@@ -637,7 +690,9 @@ static void ota_auto_check_task(void *arg)
         if (ota_update_available()) {
             continue;
         }
-        ESP_LOGI(TAG, "daily update check");
+        ESP_LOGI(TAG, "%s %s update check",
+                 frequency == OTA_CHECK_WEEKLY ? "weekly" : "daily",
+                 ota_update_get_beta_enabled() ? "beta" : "stable");
         ota_check_for_updates();
     }
 }

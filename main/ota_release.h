@@ -41,7 +41,7 @@ bool ota_release_parse_github(const char *json, size_t len,
 bool ota_release_url_allowed(const char *url);
 
 /** Semantic version comparison. A valid latest version beats an unversioned
- * development build; prerelease suffixes are ignored for numeric comparison. */
+ * development build; a final release beats a prerelease with the same core. */
 bool ota_release_version_is_newer(const char *latest, const char *current);
 
 #ifdef __cplusplus

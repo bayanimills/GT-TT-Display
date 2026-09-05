@@ -78,6 +78,7 @@ static lv_obj_t *ota_section = NULL;
 static lv_obj_t *restore_details_cont = NULL;
 static lv_obj_t *restore_disclosure_btn = NULL;
 static bool restore_details_expanded = false;
+static lv_obj_t *ota_frequency_dropdown = NULL;
 
 static settings_info_t current_settings = {
     .performance_mode = PERFORMANCE_MEDIUM,
@@ -127,12 +128,16 @@ static const char *display_corner_options =
     "Hidden Upper Right\n"
     "Hidden Upper Left";
 
+static const char *ota_frequency_options = "Manual\nDaily\nWeekly";
+
 #define SETTINGS_NVS_NAMESPACE "settings"
 #define SETTINGS_NVS_TZ_INDEX_KEY "tz_index"
 
 static void settings_display_schedule_changed(lv_event_t *e);
 static void settings_refresh_schedule_status(void);
 static void settings_ota_auto_toggled(lv_event_t *e);
+static void settings_ota_beta_toggled(lv_event_t *e);
+static void settings_ota_frequency_changed(lv_event_t *e);
 static void settings_schedule_timer_cb(lv_timer_t *t);
 static void settings_original_restore_clicked(lv_event_t *e);
 static void settings_restore_overlay_close(lv_event_t *e);
@@ -780,10 +785,10 @@ static void settings_restore_disclosure_clicked(lv_event_t *e)
     restore_details_expanded = !restore_details_expanded;
     if (restore_details_expanded) {
         lv_obj_clear_flag(restore_details_cont, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_height(ota_section, 456);
+        lv_obj_set_height(ota_section, 516);
     } else {
         lv_obj_add_flag(restore_details_cont, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_height(ota_section, 306);
+        lv_obj_set_height(ota_section, 366);
     }
 
     lv_obj_t *label = lv_obj_get_child(restore_disclosure_btn, 0);
@@ -1052,6 +1057,7 @@ static void glass_settings_reset_refs(void)
     display_dim_slider = display_dim_value_label = NULL;
     theme_dropdown = skin_dropdown = NULL;
     ota_update_btn = ota_status_label = ota_progress_bar = ota_version_label = NULL;
+    ota_frequency_dropdown = NULL;
     ota_restore_btn = ota_restore_status_label = ota_section = NULL;
     restore_details_cont = restore_disclosure_btn = NULL;
     memset(glass_pool_values, 0, sizeof(glass_pool_values));
@@ -1491,7 +1497,8 @@ static void glass_settings_build_system(void)
 
     ota_section = glass_settings_card(glass_settings_body, 18, 276, 716, 110);
     ota_version_label = lv_label_create(ota_section);
-    lv_label_set_text_fmt(ota_version_label, "Firmware %s", ota_get_current_version());
+    lv_label_set_text_fmt(ota_version_label, "Firmware %s - %s", ota_get_current_version(),
+                          ota_update_get_beta_enabled() ? "Beta" : "Stable");
     lv_obj_set_style_text_color(ota_version_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(ota_version_label, &lv_font_montserrat_18, 0);
     lv_obj_set_pos(ota_version_label, 16, 10);
@@ -1508,14 +1515,30 @@ static void glass_settings_build_system(void)
     lv_bar_set_range(ota_progress_bar, 0, 100);
     lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
     glass_style_bar(ota_progress_bar);
+
+    lv_obj_t *beta_sw = settings_toggle_row(ota_section, "Beta", 2, 166, 56, true);
+    lv_obj_set_x(lv_obj_get_parent(beta_sw), 350);
+    if (ota_update_get_beta_enabled()) lv_obj_add_state(beta_sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(beta_sw, settings_ota_beta_toggled, LV_EVENT_VALUE_CHANGED, NULL);
+
+    ota_frequency_dropdown = lv_dropdown_create(ota_section);
+    lv_obj_set_size(ota_frequency_dropdown, 170, 48);
+    lv_obj_set_pos(ota_frequency_dropdown, 530, 6);
+    lv_dropdown_set_options(ota_frequency_dropdown, ota_frequency_options);
+    lv_dropdown_set_selected(ota_frequency_dropdown,
+                             (uint16_t)ota_update_get_check_frequency());
+    glass_style_dropdown(ota_frequency_dropdown);
+    lv_obj_add_event_cb(ota_frequency_dropdown, settings_ota_frequency_changed,
+                        LV_EVENT_VALUE_CHANGED, NULL);
+
     ota_update_btn = create_settings_button(ota_section, "UPDATE",
                                              settings_ota_update_clicked, false);
-    lv_obj_set_size(ota_update_btn, 158, 54);
-    lv_obj_set_pos(ota_update_btn, 372, 28);
+    lv_obj_set_size(ota_update_btn, 166, 44);
+    lv_obj_set_pos(ota_update_btn, 350, 62);
     ota_restore_btn = create_settings_button(ota_section, "OFFICIAL RESTORE",
                                               settings_original_restore_clicked, false);
-    lv_obj_set_size(ota_restore_btn, 158, 54);
-    lv_obj_set_pos(ota_restore_btn, 542, 28);
+    lv_obj_set_size(ota_restore_btn, 170, 44);
+    lv_obj_set_pos(ota_restore_btn, 530, 62);
     ota_restore_status_label = lv_label_create(ota_section);
     lv_label_set_text(ota_restore_status_label, "Official release: check before restoring");
     lv_obj_add_flag(ota_restore_status_label, LV_OBJ_FLAG_HIDDEN);
@@ -2034,7 +2057,7 @@ void settings_screen_create(void)
 
     // OTA Update Section
     ota_section = lv_obj_create(main_cont);
-    lv_obj_set_size(ota_section, 680, 306);
+    lv_obj_set_size(ota_section, 680, 366);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -2049,7 +2072,9 @@ void settings_screen_create(void)
     ota_version_label = lv_label_create(ota_section);
     char version_text[64];
     const char *version = ota_get_current_version();
-    snprintf(version_text, sizeof(version_text), "Current: %s", version ? version : "Unknown");
+    snprintf(version_text, sizeof(version_text), "Current: %s - %s",
+             version ? version : "Unknown",
+             ota_update_get_beta_enabled() ? "Beta channel" : "Stable channel");
     lv_label_set_text(ota_version_label, version_text);
     lv_obj_set_style_text_color(ota_version_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(ota_version_label, &lv_font_montserrat_14, 0);
@@ -2075,24 +2100,35 @@ void settings_screen_create(void)
     lv_obj_set_size(ota_update_btn, 240, 44);
     lv_obj_align(ota_update_btn, LV_ALIGN_TOP_LEFT, 0, 110);
 
-    /* Opt in to a daily check. It only ever checks: installing stays on the
-     * button above, so nothing arrives on this panel unattended. */
-    lv_obj_t *auto_sw = settings_toggle_row(ota_section, "Check for updates daily",
+    lv_obj_t *beta_sw = settings_toggle_row(ota_section, "Include beta releases",
                                              164, 660, 56, glass);
-    if (ota_update_get_auto_check()) {
-        lv_obj_add_state(auto_sw, LV_STATE_CHECKED);
-    }
-    lv_obj_add_event_cb(auto_sw, settings_ota_auto_toggled, LV_EVENT_VALUE_CHANGED, NULL);
+    if (ota_update_get_beta_enabled()) lv_obj_add_state(beta_sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(beta_sw, settings_ota_beta_toggled, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *frequency_label = lv_label_create(ota_section);
+    lv_label_set_text(frequency_label, "Automatic check frequency");
+    lv_obj_set_style_text_color(frequency_label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(frequency_label, &lv_font_montserrat_16, 0);
+    lv_obj_align(frequency_label, LV_ALIGN_TOP_LEFT, 16, 240);
+    ota_frequency_dropdown = lv_dropdown_create(ota_section);
+    lv_obj_set_size(ota_frequency_dropdown, 220, 48);
+    lv_obj_align(ota_frequency_dropdown, LV_ALIGN_TOP_RIGHT, -10, 224);
+    lv_dropdown_set_options(ota_frequency_dropdown, ota_frequency_options);
+    lv_dropdown_set_selected(ota_frequency_dropdown,
+                             (uint16_t)ota_update_get_check_frequency());
+    style_settings_dropdown(ota_frequency_dropdown, &lv_font_montserrat_16);
+    lv_obj_add_event_cb(ota_frequency_dropdown, settings_ota_frequency_changed,
+                        LV_EVENT_VALUE_CHANGED, NULL);
 
     restore_disclosure_btn = create_settings_button(ota_section,
                                                      "RESTORE ORIGINAL FIRMWARE...",
                                                      settings_restore_disclosure_clicked, false);
     lv_obj_set_size(restore_disclosure_btn, 660, 56);
-    lv_obj_align(restore_disclosure_btn, LV_ALIGN_TOP_LEFT, 0, 230);
+    lv_obj_align(restore_disclosure_btn, LV_ALIGN_TOP_LEFT, 0, 290);
 
     restore_details_cont = lv_obj_create(ota_section);
     lv_obj_set_size(restore_details_cont, 660, 140);
-    lv_obj_align(restore_details_cont, LV_ALIGN_TOP_LEFT, 0, 296);
+    lv_obj_align(restore_details_cont, LV_ALIGN_TOP_LEFT, 0, 356);
     lv_obj_set_style_bg_opa(restore_details_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(restore_details_cont, 0, 0);
     lv_obj_set_style_pad_all(restore_details_cont, 0, 0);
@@ -2256,6 +2292,19 @@ static void settings_schedule_timer_cb(lv_timer_t *t)
 static void settings_ota_auto_toggled(lv_event_t *e)
 {
     ota_update_set_auto_check(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
+static void settings_ota_beta_toggled(lv_event_t *e)
+{
+    ota_update_set_beta_enabled(
+        lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
+static void settings_ota_frequency_changed(lv_event_t *e)
+{
+    uint16_t selected = lv_dropdown_get_selected(lv_event_get_target(e));
+    if (selected > OTA_CHECK_WEEKLY) selected = OTA_CHECK_MANUAL;
+    ota_update_set_check_frequency((ota_check_frequency_t)selected);
 }
 
 void settings_scroll_to(int y)

@@ -35,6 +35,12 @@ typedef enum {
     OTA_RESTORE_ERROR
 } ota_restore_status_t;
 
+typedef enum {
+    OTA_CHECK_MANUAL = 0,
+    OTA_CHECK_DAILY,
+    OTA_CHECK_WEEKLY,
+} ota_check_frequency_t;
+
 typedef struct {
     ota_status_t status;
     int progress_percent;  // 0-100
@@ -70,6 +76,13 @@ esp_err_t ota_restore_original_latest(void);
  * Persisted, so the choice survives an update. */
 bool ota_update_get_auto_check(void);
 void ota_update_set_auto_check(bool enabled);
+
+/* Fork release channel and automatic polling cadence. Beta is explicit and
+ * off by default; it never affects the separate official-restore channel. */
+bool ota_update_get_beta_enabled(void);
+void ota_update_set_beta_enabled(bool enabled);
+ota_check_frequency_t ota_update_get_check_frequency(void);
+void ota_update_set_check_frequency(ota_check_frequency_t frequency);
 
 /* True when a poll or a manual check found a release newer than the
  * running one. Drives the badge, so it must stay cheap. */

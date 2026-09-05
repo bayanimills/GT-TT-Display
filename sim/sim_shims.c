@@ -51,6 +51,8 @@ const char *ota_get_current_version(void) { return "sim"; }
  * nothing here to install. */
 static bool s_auto_check_loaded = false;
 static bool s_auto_check = false;
+static bool s_beta = false;
+static ota_check_frequency_t s_frequency = OTA_CHECK_MANUAL;
 
 bool ota_update_get_auto_check(void)
 {
@@ -60,6 +62,13 @@ bool ota_update_get_auto_check(void)
         if (nvs_open("gtdisplay", NVS_READONLY, &h) == ESP_OK) {
             uint8_t v = 0;
             if (nvs_get_u8(h, "ota_auto", &v) == ESP_OK) s_auto_check = (v != 0);
+            if (nvs_get_u8(h, "ota_beta", &v) == ESP_OK) s_beta = (v != 0);
+            v = s_auto_check ? OTA_CHECK_DAILY : OTA_CHECK_MANUAL;
+            if (nvs_get_u8(h, "ota_freq", &v) == ESP_OK && v <= OTA_CHECK_WEEKLY)
+                s_frequency = (ota_check_frequency_t)v;
+            else
+                s_frequency = s_auto_check ? OTA_CHECK_DAILY : OTA_CHECK_MANUAL;
+            s_auto_check = s_frequency != OTA_CHECK_MANUAL;
             nvs_close(h);
         }
     }
@@ -68,15 +77,41 @@ bool ota_update_get_auto_check(void)
 
 void ota_update_set_auto_check(bool enabled)
 {
-    (void) ota_update_get_auto_check();
-    s_auto_check = enabled;
+    ota_update_set_check_frequency(enabled ? OTA_CHECK_DAILY : OTA_CHECK_MANUAL);
+}
+
+bool ota_update_get_beta_enabled(void) { (void)ota_update_get_auto_check(); return s_beta; }
+void ota_update_set_beta_enabled(bool enabled)
+{
+    (void)ota_update_get_auto_check();
+    s_beta = enabled;
     nvs_handle_t h;
     if (nvs_open("gtdisplay", NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_u8(h, "ota_auto", enabled ? 1 : 0);
+        nvs_set_u8(h, "ota_beta", enabled ? 1 : 0);
         nvs_commit(h);
         nvs_close(h);
     }
-    ESP_LOGI(TAG, "ota: daily check %s", enabled ? "on" : "off");
+}
+
+ota_check_frequency_t ota_update_get_check_frequency(void)
+{
+    (void)ota_update_get_auto_check();
+    return s_frequency;
+}
+
+void ota_update_set_check_frequency(ota_check_frequency_t frequency)
+{
+    (void)ota_update_get_auto_check();
+    if (frequency > OTA_CHECK_WEEKLY) frequency = OTA_CHECK_MANUAL;
+    s_frequency = frequency;
+    s_auto_check = frequency != OTA_CHECK_MANUAL;
+    nvs_handle_t h;
+    if (nvs_open("gtdisplay", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "ota_freq", (uint8_t)frequency);
+        nvs_set_u8(h, "ota_auto", s_auto_check ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
 }
 
 bool ota_update_available(void) { return s_ota.status == OTA_STATUS_UPDATE_AVAILABLE; }

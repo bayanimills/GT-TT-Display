@@ -24,6 +24,19 @@ static void parse_selects_versioned(void)
     assert(r.size == 2074048U);
 }
 
+static void parse_accepts_beta_release_list(void)
+{
+    const char *json =
+        "[{\"tag_name\":\"v1.6.0-beta.1\",\"prerelease\":true,\"assets\":["
+        "{\"name\":\"esp-display-ota-v1.6.0-beta.1.bin\",\"state\":\"uploaded\","
+        "\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+        "\"size\":100,\"browser_download_url\":\"https://github.com/bayanimills/GT-TT-Display/releases/download/v1.6.0-beta.1/esp-display-ota-v1.6.0-beta.1.bin\"}]}]";
+    ota_release_t r;
+    assert(ota_release_parse_github(json, strlen(json), "bayanimills", "GT-TT-Display",
+                                    1000, &r));
+    assert(strcmp(r.tag, "v1.6.0-beta.1") == 0);
+}
+
 static void rejects_bad_assets(void)
 {
     const char *wrong_repo =
@@ -75,11 +88,14 @@ static void url_and_version_policy(void)
     assert(ota_release_version_is_newer("v1.2.3", "dev"));
     assert(!ota_release_version_is_newer("v1.2.3", "v1.2.3"));
     assert(!ota_release_version_is_newer("v1.2.2", "v1.2.3"));
+    assert(ota_release_version_is_newer("v1.2.3", "v1.2.3-beta.2"));
+    assert(!ota_release_version_is_newer("v1.2.3-beta.2", "v1.2.3"));
 }
 
 int main(void)
 {
     parse_selects_versioned();
+    parse_accepts_beta_release_list();
     rejects_bad_assets();
     url_and_version_policy();
     puts("ota release tests passed");

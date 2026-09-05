@@ -1729,23 +1729,44 @@ static void drawer_toggle_cb(lv_event_t *e)
 
 static void drawer_grabber_cb(lv_event_t *e)
 {
-    static uint32_t gesture_at = 0;
-    static bool gesture_release_pending = false;
-    if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
-        lv_indev_t *indev = lv_indev_get_act();
-        if (!indev || lv_indev_get_gesture_dir(indev) != LV_DIR_TOP) return;
-        gesture_at = lv_tick_get();
-        gesture_release_pending = true;
-        glass_navigate(s_host_kind == GLASS_SCREEN_SETTINGS
-                           ? GLASS_SCREEN_HOME : GLASS_SCREEN_SETTINGS);
+    static lv_point_t press;
+    static bool armed;
+    static bool moved;
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_indev_t *indev = lv_indev_get_act();
+
+    if (code == LV_EVENT_PRESSED) {
+        armed = true;
+        moved = false;
+        if (indev) lv_indev_get_point(indev, &press);
         return;
     }
-    if (gesture_release_pending) {
-        gesture_release_pending = false;
-        if (lv_tick_elaps(gesture_at) < 300U) return; /* release after the swipe */
+    if (code == LV_EVENT_PRESSING && armed && indev) {
+        lv_point_t point;
+        lv_indev_get_point(indev, &point);
+        int32_t dx = point.x - press.x;
+        int32_t dy = point.y - press.y;
+        if (dx < -10 || dx > 10 || dy < -10 || dy > 10) moved = true;
+        return;
     }
-    glass_navigate(s_host_kind == GLASS_SCREEN_SETTINGS
-                       ? GLASS_SCREEN_HOME : GLASS_SCREEN_SETTINGS);
+    if (code == LV_EVENT_PRESS_LOST) {
+        armed = false;
+        return;
+    }
+    if (code != LV_EVENT_CLICKED || !armed) return;
+    armed = false;
+    if (moved) return;
+
+    /* Navigate only after a completed tap. Changing screens during GESTURE
+     * leaves the pointer down and lets its later release hit the replacement
+     * screen's grabber, immediately toggling back. */
+    glass_screen_t target = s_host_kind == GLASS_SCREEN_SETTINGS
+                                ? GLASS_SCREEN_HOME : GLASS_SCREEN_SETTINGS;
+    /* The pressed screen remains cached, so explicitly forget its input
+     * object before it becomes inactive. Otherwise LVGL can deliver the next
+     * pointer sample to that old grabber and toggle straight back. */
+    if (indev) lv_indev_reset(indev, NULL);
+    glass_goto(target);
 }
 
 void glass_attach_drawer_toggle(lv_obj_t *obj)
@@ -2522,8 +2543,7 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
         lv_obj_clear_flag(s_host_wall, LV_OBJ_FLAG_CLICKABLE);
     }
 
-    /* A generous invisible target makes the persistent grabber truthful: it
-     * accepts either a tap or the upward swipe the visual affordance implies. */
+    /* A generous invisible target makes the persistent grabber easy to tap. */
     lv_obj_t *grab_target = lv_obj_create(scr);
     lv_obj_set_size(grab_target, 180, 44);
     lv_obj_align(grab_target, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -2531,8 +2551,11 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
     lv_obj_set_style_border_width(grab_target, 0, 0);
     lv_obj_set_style_pad_all(grab_target, 0, 0);
     lv_obj_clear_flag(grab_target, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_flag(grab_target, LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_GESTURE, NULL);
+    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESS_LOST, NULL);
 
     lv_obj_t *grab = lv_obj_create(grab_target);
     lv_obj_set_size(grab, 56, 6);
@@ -2542,7 +2565,15 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
     lv_obj_set_style_bg_opa(grab, dim ? LV_OPA_20 : LV_OPA_50, 0);
     lv_obj_set_style_border_width(grab, 0, 0);
     lv_obj_set_style_pad_all(grab, 0, 0);
-    lv_obj_clear_flag(grab, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    /* The visible bar is a child of the generous target. Make it an equally
+     * valid target rather than allowing it to intercept the centre of the
+     * advertised tap area. Only one of these objects can own a press. */
+    lv_obj_clear_flag(grab, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_flag(grab, LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_add_event_cb(grab, drawer_grabber_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(grab, drawer_grabber_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(grab, drawer_grabber_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(grab, drawer_grabber_cb, LV_EVENT_PRESS_LOST, NULL);
     return scr;
 }
 

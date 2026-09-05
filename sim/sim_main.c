@@ -73,6 +73,8 @@ static bool      s_running   = true;
 
 static int16_t   s_touch_x = 0, s_touch_y = 0;
 static bool      s_touch_down = false;
+static bool      s_repaint_after_release = false;
+static bool      s_release_read = false;
 
 static pthread_mutex_t s_lvgl_m;
 
@@ -98,6 +100,7 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     data->point.y = s_touch_y;
     /* Same gate as lvgl_port.c: a touch while dark wakes and is swallowed. */
     data->state   = display_control_filter_touch(s_touch_down) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    if (!s_touch_down && s_repaint_after_release) s_release_read = true;
 }
 
 /* ---------------- port shims the UI expects ---------------- */
@@ -256,6 +259,7 @@ static void handle_command(char *line)
             s_touch_x = (int16_t) x;
             s_touch_y = (int16_t) y;
             s_touch_down = down != 0;
+            if (!s_touch_down) s_repaint_after_release = true;
         }
         break;
     }
@@ -452,13 +456,18 @@ static void poll_stdin(void)
     struct timeval tv = { 0, 0 };
     FD_ZERO(&fds);
     FD_SET(STDIN_FILENO, &fds);
+    /* Drain inexpensive data/configuration bursts, but stop after one touch
+     * sample. Consuming T-down and T-up in the same UI iteration collapses
+     * them into RELEASED before LVGL gets a read, losing quick human taps. */
     while (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0) {
         if (!fgets(buf, sizeof(buf), stdin)) { s_running = false; return; }
         char *nl = strpbrk(buf, "\r\n");
         if (nl) *nl = 0;
         /* Commands touch LVGL objects, and the price/mempool tasks take the same
          * lock to update labels: hold it here or the two race. */
+        bool touch_sample = buf[0] == 'T';
         if (buf[0]) { lvgl_port_lock(-1); handle_command(buf); lvgl_port_unlock(); }
+        if (touch_sample) break;
         FD_ZERO(&fds);
         FD_SET(STDIN_FILENO, &fds);
         tv.tv_sec = 0;
@@ -563,7 +572,18 @@ int main(void)
         }
 
         lvgl_port_lock(-1);
+        lv_obj_t *screen_before = lv_scr_act();
         lv_timer_handler();
+        /* A release callback can replace the active screen after the display
+         * refresh timer already ran in this handler pass. Invalidate the new
+         * screen here so the next pass paints it immediately instead of
+         * waiting for an unrelated metric update or manual Repaint command. */
+        if (s_release_read || lv_scr_act() != screen_before) {
+            s_release_read = false;
+            s_repaint_after_release = false;
+            lv_obj_invalidate(lv_scr_act());
+            lv_refr_now(NULL);
+        }
         lvgl_port_unlock();
 
         if (s_dirty) {

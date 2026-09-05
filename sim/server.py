@@ -18,6 +18,7 @@ import select
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -254,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             if body:
                 self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             # Normal when a tab closes or abandons a superseded long poll.
             pass
 
@@ -298,7 +299,27 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/cmd":
             lines = [line.strip() for line in body.splitlines() if line.strip()]
-            self.server.sim.send_many(lines)
+            queued = []
+            release = False
+            for line in lines:
+                queued.append(line)
+                # The release callback can swap cached screens after the
+                # display timer's turn. Queue a repaint behind the release so
+                # the browser receives that new screen without needing a
+                # second pointer event or an unrelated telemetry update.
+                parts = line.split()
+                if len(parts) == 4 and parts[0] == "T" and parts[3] == "0":
+                    release = True
+                    queued.append("R")
+            before = self.server.sim.frame_no
+            self.server.sim.send_many(queued)
+            if release:
+                # Do not acknowledge a completed pointer interaction while
+                # the browser can still only fetch its pre-release pixels.
+                # One frame may contain the released style; the queued repaint
+                # guarantees the following frame represents the final screen.
+                after, _ = self.server.sim.wait_frame(before, timeout=1.0)
+                self.server.sim.wait_frame(after, timeout=1.0)
             return self._send(200, b"ok", "text/plain")
 
         if self.path == "/demo":
@@ -320,6 +341,14 @@ class Handler(BaseHTTPRequestHandler):
 class SimServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        # Browsers routinely abandon superseded long-poll sockets. Keep those
+        # expected disconnects from burying real simulator failures in noise.
+        if isinstance(sys.exc_info()[1],
+                      (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
 
 
 class SimServer6(SimServer):
