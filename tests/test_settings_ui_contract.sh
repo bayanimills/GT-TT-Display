@@ -77,7 +77,8 @@ rg -Fq '#define LV_USE_PERF_MONITOR 0' "$lv_conf"
 # during pointer motion can retarget the same touch to the replacement screen.
 rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_CLICKED, NULL)' "$glass_file"
 rg -Fq 'lv_obj_clear_flag(grab, LV_OBJ_FLAG_CLICKABLE' "$glass_file"
-rg -Fq 'lv_indev_wait_release(indev)' "$glass_file"
+rg -Fq 'lv_async_call(drawer_grabber_navigate_async' "$glass_file"
+rg -Fq 'if (kind == GLASS_SCREEN_SETTINGS) return scr;' "$glass_file"
 if rg -q 'lv_obj_add_event_cb\((grab_target|grab), drawer_grabber_cb, LV_EVENT_(PRESSED|PRESSING|PRESS_LOST|GESTURE)' "$glass_file"; then
     echo "Glass bottom navigation must react only to the completed parent tap" >&2
     exit 1

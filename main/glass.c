@@ -1727,28 +1727,36 @@ static void drawer_toggle_cb(lv_event_t *e)
     else               glass_drawer_open();
 }
 
+static bool s_grabber_navigation_pending;
+static uint32_t s_grabber_last_navigation_at;
+
+static void drawer_grabber_navigate_async(void *target_ptr)
+{
+    s_grabber_navigation_pending = false;
+    glass_goto((glass_screen_t)(intptr_t)target_ptr);
+}
+
 static void drawer_grabber_cb(lv_event_t *e)
 {
-    static uint32_t last_navigation_at;
-    static bool has_navigated;
-    lv_indev_t *indev = lv_indev_get_act();
-
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
 
-    /* Some touch controllers briefly repeat the release at the same point.
-     * Since every Glass screen has a grabber in that position, the repeated
-     * click can otherwise navigate to Settings and immediately back again. */
-    if (has_navigated && lv_tick_elaps(last_navigation_at) < 500U) return;
-    has_navigated = true;
-    last_navigation_at = lv_tick_get();
+    /* Never replace the active screen while LVGL is still dispatching the
+     * release event for an object on that screen. The real GT911 keeps the
+     * contact alive longer than the browser simulator and can otherwise
+     * retarget the same touch to objects on the replacement screen. */
+    if (s_grabber_navigation_pending) return;
+    uint32_t now = lv_tick_get();
+    if (s_grabber_last_navigation_at != 0 &&
+        lv_tick_elaps(s_grabber_last_navigation_at) < 500U) return;
 
     glass_screen_t target = s_host_kind == GLASS_SCREEN_SETTINGS
                                 ? GLASS_SCREEN_HOME : GLASS_SCREEN_SETTINGS;
-    /* Consume any still-active hardware contact instead of resetting LVGL's
-     * pointer state mid-click. A reset here can retarget the same physical
-     * touch to the replacement screen. */
-    if (indev) lv_indev_wait_release(indev);
-    glass_goto(target);
+    s_grabber_navigation_pending = true;
+    s_grabber_last_navigation_at = now;
+    if (lv_async_call(drawer_grabber_navigate_async,
+                      (void *)(intptr_t)target) != LV_RES_OK) {
+        s_grabber_navigation_pending = false;
+    }
 }
 
 void glass_attach_drawer_toggle(lv_obj_t *obj)
@@ -2524,6 +2532,11 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
         if (dim) lv_obj_set_style_img_opa(s_host_wall, LV_OPA_20, 0);
         lv_obj_clear_flag(s_host_wall, LV_OBJ_FLAG_CLICKABLE);
     }
+
+    /* Settings already has a large Home card. Do not put another navigation
+     * target at the exact coordinate used to enter Settings: a noisy release
+     * from the physical panel must have nowhere to toggle straight back to. */
+    if (kind == GLASS_SCREEN_SETTINGS) return scr;
 
     /* A generous invisible target makes the persistent grabber easy to tap. */
     lv_obj_t *grab_target = lv_obj_create(scr);
