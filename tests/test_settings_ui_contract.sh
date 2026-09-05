@@ -65,6 +65,8 @@ fi
 
 rg -Fq 'indev_drv_tp.scroll_limit = 8' "$lvgl_port_file"
 rg -Fq 'indev_drv_tp.scroll_throw = 8' "$lvgl_port_file"
+rg -Fq 'TOUCH_RELEASE_DEBOUNCE_READS = 3' "$lvgl_port_file"
+rg -Fq 'reported_pressed && ++release_misses < TOUCH_RELEASE_DEBOUNCE_READS' "$lvgl_port_file"
 rg -Fxq 'CONFIG_EXAMPLE_LVGL_PORT_TASK_MIN_DELAY_MS=5' "$sdk_defaults"
 rg -Fxq 'CONFIG_EXAMPLE_LVGL_PORT_TASK_PRIORITY=4' "$sdk_defaults"
 rg -Fxq 'CONFIG_LV_DISP_DEF_REFR_PERIOD=25' "$sdk_defaults"

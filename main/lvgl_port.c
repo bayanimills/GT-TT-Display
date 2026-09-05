@@ -431,6 +431,16 @@ static lv_disp_t *display_init(esp_lcd_panel_handle_t panel_handle)
 
 static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
 {
+    /* GT911 can briefly report zero contacts during a held finger. At the
+     * 10 ms input period, treating one empty sample as RELEASED turns that
+     * dropout into CLICKED and the returning contact into a second press on
+     * whatever the first click just opened. Require a short, bounded run of
+     * empty samples before publishing the release to LVGL. */
+    enum { TOUCH_RELEASE_DEBOUNCE_READS = 3 };
+    static uint8_t release_misses;
+    static bool reported_pressed;
+    static lv_point_t last_point;
+
     esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)indev_drv->user_data; // Get touchpad handle from user data
     assert(tp); // Ensure touchpad handle is valid
 
@@ -446,9 +456,19 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
     if (touchpad_pressed && touchpad_cnt > 0) {
         data->point.x = touchpad_x; // Set the X coordinate
         data->point.y = touchpad_y; // Set the Y coordinate
+        last_point = data->point;
+        release_misses = 0;
         /* A touch while dark wakes the display and is swallowed until release. */
-        data->state = display_control_filter_touch(true) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+        reported_pressed = display_control_filter_touch(true);
+        data->state = reported_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
     } else {
+        if (reported_pressed && ++release_misses < TOUCH_RELEASE_DEBOUNCE_READS) {
+            data->point = last_point;
+            data->state = LV_INDEV_STATE_PRESSED;
+            return;
+        }
+        release_misses = 0;
+        reported_pressed = false;
         display_control_filter_touch(false);
         data->state = LV_INDEV_STATE_RELEASED; // Set state to released
     }
