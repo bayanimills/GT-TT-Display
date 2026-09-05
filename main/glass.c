@@ -1626,6 +1626,10 @@ static void glass_adopt_host(glass_screen_t kind)
     s_host_dim  = rec->dim;
     s_host_wall = rec->wall;
     display_control_set_power_button_dim(rec->dim);
+    /* Settings owns the configuration controls, not the floating shortcut.
+     * Cached navigation does not destroy Settings, so visibility must follow
+     * the adopted screen rather than relying on its destroy callback. */
+    display_control_set_power_button_visible(kind != GLASS_SCREEN_SETTINGS);
     display_control_refresh_skin();
 }
 
