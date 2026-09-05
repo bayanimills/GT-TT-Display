@@ -25,6 +25,7 @@ static lv_obj_t *odds_subtitle_label = NULL;
 static lv_obj_t *odds_stat_value[3] = { NULL, NULL, NULL };
 static lv_obj_t *odds_stat_caption[3] = { NULL, NULL, NULL };
 static lv_timer_t *odds_timer = NULL;
+static bool odds_show_hashrate = false;
 
 static lv_obj_t *create_bottom_nav_btn(lv_obj_t *parent, const char *symbol, lv_event_cb_t event_cb, bool active);
 static lv_obj_t *create_bottom_nav_btn_img(lv_obj_t *parent, const lv_img_dsc_t *img_dsc, lv_event_cb_t event_cb, bool active);
@@ -113,7 +114,7 @@ void odds_refresh(void)
      * can be traced to a stale hashrate or a chain fetch that never landed. */
     if (ghs > 0.0)
     {
-        snprintf(buf, sizeof(buf), "%.2f TH/s  -  %s", ghs / 1000.0,
+        snprintf(buf, sizeof(buf), "%s",
                  d->valid ? chain_source_name(chain_get_source()) : "waiting for network");
     }
     else
@@ -134,7 +135,16 @@ void odds_refresh(void)
         fmt_wait(expected, buf, sizeof(buf));
         odds_set(odds_stat_value[0], buf);
 
-        chain_fmt_compact(d->difficulty, buf, sizeof(buf));
+        if (odds_show_hashrate)
+        {
+            snprintf(buf, sizeof(buf), "%.2f TH/s", ghs / 1000.0);
+            odds_set(odds_stat_caption[1], "MINER HASHRATE  -  TAP");
+        }
+        else
+        {
+            chain_fmt_compact(d->difficulty, buf, sizeof(buf));
+            odds_set(odds_stat_caption[1], "NETWORK DIFFICULTY  -  TAP");
+        }
         odds_set(odds_stat_value[1], buf);
 
         /* Third cell: what the same hashrate would be worth on a pool. It is
@@ -160,6 +170,9 @@ void odds_refresh(void)
                                               : "WAITING FOR HASHRATE");
         odds_set(odds_stat_value[0], "--");
         odds_set(odds_stat_value[1], "--");
+        odds_set(odds_stat_caption[1], odds_show_hashrate
+                                         ? "MINER HASHRATE  -  TAP"
+                                         : "NETWORK DIFFICULTY  -  TAP");
         odds_set(odds_stat_value[2], "--");
     }
 }
@@ -167,6 +180,13 @@ void odds_refresh(void)
 static void odds_timer_cb(lv_timer_t *t)
 {
     (void)t;
+    odds_refresh();
+}
+
+static void odds_network_card_clicked(lv_event_t *e)
+{
+    (void)e;
+    odds_show_hashrate = !odds_show_hashrate;
     odds_refresh();
 }
 
@@ -195,11 +215,20 @@ static void odds_build_stat(lv_obj_t *parent, int index, const char *caption,
     }
     lv_obj_align(card, LV_ALIGN_TOP_LEFT, x, y);
 
+    if (index == 1)
+    {
+        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_bg_color(card, COLOR_ACCENT, LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(card, LV_OPA_20, LV_STATE_PRESSED);
+        lv_obj_add_event_cb(card, odds_network_card_clicked, LV_EVENT_CLICKED, NULL);
+    }
+
     odds_stat_value[index] = lv_label_create(card);
     lv_label_set_text(odds_stat_value[index], "--");
     lv_obj_set_style_text_color(odds_stat_value[index], COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(odds_stat_value[index], &lv_font_montserrat_32, 0);
     lv_obj_align(odds_stat_value[index], LV_ALIGN_CENTER, 0, -12);
+    lv_obj_clear_flag(odds_stat_value[index], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
     odds_stat_caption[index] = lv_label_create(card);
     lv_label_set_text(odds_stat_caption[index], caption);
@@ -208,6 +237,7 @@ static void odds_build_stat(lv_obj_t *parent, int index, const char *caption,
     lv_obj_set_style_text_align(odds_stat_caption[index], LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(odds_stat_caption[index], w - 20);
     lv_obj_align(odds_stat_caption[index], LV_ALIGN_CENTER, 0, 24);
+    lv_obj_clear_flag(odds_stat_caption[index], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 }
 
 void odds_screen_create(void)
@@ -236,9 +266,9 @@ void odds_screen_create(void)
     }
 
     lv_obj_t *title = lv_label_create(parent);
-    lv_label_set_text(title, "SOLO MINING ODDS");
+    lv_label_set_text(title, "What are the odds?");
     lv_obj_set_style_text_color(title, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 14);
     if (glass) glass_pill_label(title, false);
 
@@ -293,6 +323,13 @@ void odds_screen_create(void)
     odds_build_stat(parent, 0, "EXPECTED WAIT",     row_x,                       row_y, card_w, card_h, glass);
     odds_build_stat(parent, 1, "NETWORK DIFFICULTY", row_x + card_w + gap,        row_y, card_w, card_h, glass);
     odds_build_stat(parent, 2, "IF POOLED, PER DAY", row_x + (card_w + gap) * 2,  row_y, card_w, card_h, glass);
+
+    lv_obj_t *source = lv_label_create(parent);
+    lv_label_set_text(source, "bitview.space");
+    lv_obj_set_style_text_color(source, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(source, &lv_font_montserrat_14, 0);
+    lv_obj_align(source, LV_ALIGN_BOTTOM_MID, 0, -10);
+    if (glass) glass_pill_label(source, false);
 
     /* The miner's hashrate moves between BAP frames and the chain snapshot
      * lands on its own schedule, so repaint on a timer rather than wiring a

@@ -62,7 +62,9 @@ static lv_obj_t *glass_settings_pane = NULL;
 static lv_obj_t *display_dim_slider = NULL;
 static lv_obj_t *display_dim_value_label = NULL;
 static lv_timer_t *glass_pool_timer = NULL;
+static lv_obj_t *glass_pool_names[8] = { NULL };
 static lv_obj_t *glass_pool_values[8] = { NULL };
+static int glass_theme_page = 0;
 static lv_obj_t *sys_overlay = NULL;
 static int diag_counter = 0;
 
@@ -1017,6 +1019,9 @@ static lv_obj_t *glass_settings_card(lv_obj_t *parent, int x, int y, int w, int 
     lv_obj_set_style_pad_all(card, 0, 0);
     lv_obj_set_style_shadow_width(card, 0, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    /* Settings tiles own the completed tap; without this the pressed visual
+     * appears but LVGL never dispatches LV_EVENT_CLICKED to the route. */
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     return card;
 }
 
@@ -1069,6 +1074,7 @@ static void glass_settings_reset_refs(void)
     ota_frequency_dropdown = NULL;
     ota_restore_btn = ota_restore_status_label = ota_section = NULL;
     restore_details_cont = restore_disclosure_btn = NULL;
+    memset(glass_pool_names, 0, sizeof(glass_pool_names));
     memset(glass_pool_values, 0, sizeof(glass_pool_values));
 }
 
@@ -1150,7 +1156,7 @@ static void glass_settings_build_hub(void)
         { "Odds",    "Solo mining",    true,  GLASS_SCREEN_ODDS },
         { "Feed",    "Recent updates", true,  GLASS_SCREEN_FEED },
         { "Wi-Fi",   "Network setup",  true,  GLASS_SCREEN_WIFI },
-        { "Style",   "Orange + Glass", false, GLASS_SETTINGS_STYLE },
+        { "Theme",   "Wallpaper + accent", false, GLASS_SETTINGS_STYLE },
         { "Pool",    "AxeOS + latency",false, GLASS_SETTINGS_POOL },
         { "Display", "Brightness",     false, GLASS_SETTINGS_DISPLAY },
         { "System",  "Miner + firmware",false,GLASS_SETTINGS_SYSTEM },
@@ -1167,10 +1173,22 @@ static void glass_settings_build_hub(void)
     }
 }
 
-static void glass_settings_orange_clicked(lv_event_t *e)
+static void glass_settings_theme_clicked(lv_event_t *e)
 {
-    (void)e;
-    lv_async_call(settings_apply_theme_async, (void *)(intptr_t)1);
+    const int index = (int)(intptr_t)lv_event_get_user_data(e);
+    lv_async_call(settings_apply_theme_async, (void *)(intptr_t)index);
+}
+
+static void glass_settings_theme_page_clicked(lv_event_t *e)
+{
+    size_t count = 0;
+    (void)theme_presets(&count);
+    const int pages = ((int)count + 5) / 6;
+    const int delta = (int)(intptr_t)lv_event_get_user_data(e);
+    if (pages <= 1) return;
+    glass_theme_page = (glass_theme_page + delta + pages) % pages;
+    lv_async_call(glass_settings_render_async,
+                  (void *)(intptr_t)GLASS_SETTINGS_STYLE);
 }
 
 static void glass_settings_wallpaper_clicked(lv_event_t *e)
@@ -1180,45 +1198,83 @@ static void glass_settings_wallpaper_clicked(lv_event_t *e)
 
 static void glass_settings_build_style(void)
 {
-    glass_settings_header("STYLE");
+    glass_settings_header("THEME");
 
-    lv_obj_t *accent = glass_settings_card(glass_settings_body, 18, 68, 716, 94);
-    lv_obj_t *accent_title = lv_label_create(accent);
-    lv_label_set_text(accent_title, "Accent");
-    lv_obj_set_style_text_color(accent_title, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(accent_title, &lv_font_montserrat_18, 0);
-    lv_obj_align(accent_title, LV_ALIGN_LEFT_MID, 18, 0);
-    theme_dropdown = lv_dropdown_create(accent);
-    lv_obj_set_size(theme_dropdown, 290, 54);
-    lv_obj_align(theme_dropdown, LV_ALIGN_LEFT_MID, 112, 0);
-    lv_dropdown_set_options(theme_dropdown, theme_dropdown_options());
-    lv_dropdown_set_selected(theme_dropdown, theme_get_index());
-    glass_style_dropdown(theme_dropdown);
-    lv_obj_add_event_cb(theme_dropdown, settings_theme_changed, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_t *orange = create_settings_button(accent, "BITCOIN ORANGE",
-                                               glass_settings_orange_clicked,
-                                               theme_get_index() == 1);
-    lv_obj_set_size(orange, 250, 54);
-    lv_obj_align(orange, LV_ALIGN_RIGHT_MID, -16, 0);
-
-    lv_obj_t *walls = glass_settings_card(glass_settings_body, 18, 174, 716, 116);
+    lv_obj_t *walls = glass_settings_card(glass_settings_body, 18, 68, 716, 104);
     lv_obj_t *wall_title = lv_label_create(walls);
     lv_label_set_text(wall_title, "Wallpaper");
     lv_obj_set_style_text_color(wall_title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(wall_title, &lv_font_montserrat_18, 0);
-    lv_obj_set_pos(wall_title, 16, 10);
-    int count = wallpaper_count();
-    for (int i = 0; i < count && i < 3; i++) {
+    lv_obj_set_pos(wall_title, 16, 8);
+    int wall_count = wallpaper_count();
+    for (int i = 0; i < wall_count && i < 3; i++) {
         lv_obj_t *btn = create_settings_button(walls, wallpaper_name(i),
                                                 NULL,
                                                 glass_get_wallpaper() == i);
-        lv_obj_set_size(btn, 214, 54);
-        lv_obj_set_pos(btn, 16 + i * 230, 48);
+        lv_obj_set_size(btn, 214, 50);
+        lv_obj_set_pos(btn, 16 + i * 230, 42);
         lv_obj_add_event_cb(btn, glass_settings_wallpaper_clicked, LV_EVENT_CLICKED,
                             (void *)(intptr_t)i);
     }
 
-    lv_obj_t *skin = glass_settings_card(glass_settings_body, 18, 302, 716, 84);
+    lv_obj_t *accent = glass_settings_card(glass_settings_body, 18, 184, 716, 126);
+    lv_obj_t *accent_title = lv_label_create(accent);
+    lv_label_set_text(accent_title, "Accent");
+    lv_obj_set_style_text_color(accent_title, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(accent_title, &lv_font_montserrat_18, 0);
+    lv_obj_set_pos(accent_title, 16, 7);
+
+    size_t count = 0;
+    const theme_preset_t *presets = theme_presets(&count);
+    const int pages = ((int)count + 5) / 6;
+    if (glass_theme_page >= pages) glass_theme_page = 0;
+    if (pages > 1) {
+        lv_obj_t *page = lv_label_create(accent);
+        lv_label_set_text_fmt(page, "%d / %d", glass_theme_page + 1, pages);
+        lv_obj_set_style_text_color(page, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(page, &lv_font_montserrat_14, 0);
+        lv_obj_set_pos(page, 578, 10);
+        lv_obj_t *prev = create_settings_button(accent, LV_SYMBOL_LEFT, NULL, false);
+        lv_obj_set_size(prev, 44, 34);
+        lv_obj_set_pos(prev, 522, 3);
+        lv_obj_add_event_cb(prev, glass_settings_theme_page_clicked, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)-1);
+        lv_obj_t *next = create_settings_button(accent, LV_SYMBOL_RIGHT, NULL, false);
+        lv_obj_set_size(next, 44, 34);
+        lv_obj_set_pos(next, 656, 3);
+        lv_obj_add_event_cb(next, glass_settings_theme_page_clicked, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)1);
+    }
+
+    const int start = glass_theme_page * 6;
+    for (int cell = 0; cell < 6 && start + cell < (int)count; cell++) {
+        const int index = start + cell;
+        const lv_color_t colour = lv_color_hex(presets[index].slot[THEME_ACCENT]);
+        lv_obj_t *swatch = lv_btn_create(accent);
+        lv_obj_set_size(swatch, 214, 38);
+        lv_obj_set_pos(swatch, 16 + (cell % 3) * 230, 40 + (cell / 3) * 43);
+        lv_obj_set_style_radius(swatch, 12, 0);
+        lv_obj_set_style_bg_color(swatch, colour, 0);
+        lv_obj_set_style_bg_opa(swatch, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_color(swatch, lv_color_white(), 0);
+        lv_obj_set_style_border_opa(swatch, index == theme_get_index() ? LV_OPA_COVER : LV_OPA_30, 0);
+        lv_obj_set_style_border_width(swatch, index == theme_get_index() ? 3 : 1, 0);
+        lv_obj_set_style_shadow_width(swatch, 0, 0);
+        lv_obj_clear_flag(swatch, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(swatch, glass_settings_theme_clicked, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)index);
+        lv_obj_t *name = lv_label_create(swatch);
+        lv_label_set_text(name, presets[index].name);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(name, 194);
+        lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(name, theme_ink_on(colour), 0);
+        lv_obj_center(name);
+        lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
+
+    lv_obj_t *skin = glass_settings_card(glass_settings_body, 18, 322, 716, 64);
     lv_obj_t *skin_title = lv_label_create(skin);
     lv_label_set_text(skin_title, "Interface style");
     lv_obj_set_style_text_color(skin_title, COLOR_TEXT_PRIMARY, 0);
@@ -1230,6 +1286,9 @@ static void glass_settings_build_style(void)
     lv_dropdown_set_options(skin_dropdown, "Classic\nGlass");
     lv_dropdown_set_selected(skin_dropdown, (uint16_t)theme_get_skin());
     glass_style_dropdown(skin_dropdown);
+    lv_obj_set_style_text_font(skin_dropdown, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_t *skin_list = lv_dropdown_get_list(skin_dropdown);
+    if (skin_list) lv_obj_set_style_text_font(skin_list, &lv_font_montserrat_20, LV_PART_MAIN);
     lv_obj_add_event_cb(skin_dropdown, settings_skin_changed, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
@@ -1237,9 +1296,15 @@ static void glass_settings_pool_refresh_cb(lv_timer_t *timer)
 {
     (void)timer;
     int n = poolping_count();
+    int order[8];
+    for (int rank = 0; rank < n && rank < 8; rank++)
+        order[rank] = poolping_ranked(rank);
     for (int rank = 0; rank < n && rank < 8; rank++) {
         if (!glass_pool_values[rank]) continue;
-        int idx = poolping_ranked(rank);
+        int idx = order[rank];
+        const pool_entry_t *entry = poolping_entry(idx);
+        if (glass_pool_names[rank])
+            lv_label_set_text(glass_pool_names[rank], entry ? entry->label : "...");
         int ms = poolping_latency_ms(idx);
         if (ms == POOLPING_PENDING) lv_label_set_text(glass_pool_values[rank], "...");
         else if (ms == POOLPING_FAILED) lv_label_set_text(glass_pool_values[rank], "NO REPLY");
@@ -1331,13 +1396,13 @@ static void glass_settings_build_pool(void)
         lv_obj_set_style_radius(row, 10, 0);
         lv_obj_set_style_pad_all(row, 0, 0);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_t *name = lv_label_create(row);
-        lv_label_set_text(name, entry ? entry->label : "...");
-        lv_obj_set_width(name, 225);
-        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-        lv_obj_set_style_text_color(name, COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
-        lv_obj_align(name, LV_ALIGN_LEFT_MID, 12, 0);
+        glass_pool_names[rank] = lv_label_create(row);
+        lv_label_set_text(glass_pool_names[rank], entry ? entry->label : "...");
+        lv_obj_set_width(glass_pool_names[rank], 225);
+        lv_label_set_long_mode(glass_pool_names[rank], LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_color(glass_pool_names[rank], COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_font(glass_pool_names[rank], &lv_font_montserrat_14, 0);
+        lv_obj_align(glass_pool_names[rank], LV_ALIGN_LEFT_MID, 12, 0);
         glass_pool_values[rank] = lv_label_create(row);
         lv_label_set_text(glass_pool_values[rank], "...");
         lv_obj_set_style_text_color(glass_pool_values[rank], COLOR_ACCENT, 0);
@@ -1346,7 +1411,7 @@ static void glass_settings_build_pool(void)
     }
     poolping_refresh_now();
     glass_settings_pool_refresh_cb(NULL);
-    glass_pool_timer = lv_timer_create(glass_settings_pool_refresh_cb, 1000, NULL);
+    glass_pool_timer = lv_timer_create(glass_settings_pool_refresh_cb, 5000, NULL);
 }
 
 static void glass_settings_sync_display_controls(void)
@@ -2287,6 +2352,7 @@ void settings_screen_destroy(void)
     settings_restore_overlay_close(NULL);
     /* Stop page-owned timers before deleting the labels they update. */
     glass_settings_stop_page_tasks();
+    memset(glass_pool_names, 0, sizeof(glass_pool_names));
     memset(glass_pool_values, 0, sizeof(glass_pool_values));
     display_schedule_status = NULL;
     settings_main_cont = NULL;

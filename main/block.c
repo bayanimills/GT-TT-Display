@@ -18,8 +18,8 @@ static lv_obj_t *block_screen = NULL;
 static lv_obj_t *block_height_label = NULL;
 static lv_obj_t *block_title_label = NULL;
 static lv_obj_t *block_halving_value = NULL;
+static lv_obj_t *block_halving_days_value = NULL;
 static lv_obj_t *block_retarget_value = NULL;
-static lv_obj_t *block_fee_value = NULL;
 static lv_timer_t *block_network_timer = NULL;
 
 static char current_block_height_text[24] = "--";
@@ -55,18 +55,11 @@ void block_screen_create(void)
     }
 
     block_title_label = lv_label_create(block_screen);
-    lv_label_set_text(block_title_label, "BLOCKCHAIN");
+    lv_label_set_text(block_title_label, "Blockheight");
     lv_obj_set_style_text_color(block_title_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(block_title_label, &lv_font_montserrat_24, 0);
     lv_obj_align(block_title_label, LV_ALIGN_TOP_MID, 0, 14);
     if (glass) glass_pill_label(block_title_label, false);
-
-    lv_obj_t *subtitle = lv_label_create(block_screen);
-    lv_label_set_text(subtitle, "CURRENT TIP");
-    lv_obj_set_style_text_color(subtitle, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_14, 0);
-    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 45);
-    if (glass) glass_pill_label(subtitle, false);
 
     lv_obj_t *hero;
     if (glass)
@@ -157,8 +150,8 @@ void block_screen_destroy(void)
         block_height_label = NULL;
         block_title_label = NULL;
         block_halving_value = NULL;
+        block_halving_days_value = NULL;
         block_retarget_value = NULL;
-        block_fee_value = NULL;
     }
 }
 
@@ -264,9 +257,9 @@ static void block_build_network_row(lv_obj_t *host, bool glass)
     const int x      = (SCREEN_WIDTH - (cell_w * 3 + gap * 2)) / 2;
     const int y      = 282;
 
-    block_network_cell(host, "HALVING",       x,                    y, cell_w, cell_h, glass, &block_halving_value);
-    block_network_cell(host, "NEXT RETARGET", x + cell_w + gap,     y, cell_w, cell_h, glass, &block_retarget_value);
-    block_network_cell(host, "FEE RATE",      x + (cell_w + gap)*2, y, cell_w, cell_h, glass, &block_fee_value);
+    block_network_cell(host, "NEXT RETARGET",     x,                    y, cell_w, cell_h, glass, &block_retarget_value);
+    block_network_cell(host, "BLOCKS TO HALVING", x + cell_w + gap,     y, cell_w, cell_h, glass, &block_halving_value);
+    block_network_cell(host, "DAYS TO HALVING",   x + (cell_w + gap)*2, y, cell_w, cell_h, glass, &block_halving_days_value);
 
     /* The snapshot lands on the chain task's schedule, so poll it rather than
      * reaching into chain.c for a callback. A minute is far finer than the
@@ -286,8 +279,7 @@ static void block_refresh_network(void)
         if (d->blocks_to_halving > 0)
         {
             chain_fmt_grouped(d->blocks_to_halving, grouped, sizeof(grouped));
-            snprintf(buf, sizeof(buf), "%s blocks - %.0f days",
-                     grouped, d->days_to_halving);
+            snprintf(buf, sizeof(buf), "%s", grouped);
         }
         else
         {
@@ -310,21 +302,15 @@ static void block_refresh_network(void)
         lv_label_set_text(block_retarget_value, buf);
     }
 
-    if (block_fee_value)
+    if (block_halving_days_value)
     {
-        if (d->fees_valid && d->fee_fastest > 0.0)
-        {
-            if (d->fee_fastest < 10.0)
-                snprintf(buf, sizeof(buf), "%.1f sat/vB", d->fee_fastest);
-            else
-                snprintf(buf, sizeof(buf), "%.0f sat/vB", d->fee_fastest);
-        }
+        if (d->blocks_to_halving > 0)
+            snprintf(buf, sizeof(buf), "%.0f days", d->days_to_halving);
         else
-        {
             snprintf(buf, sizeof(buf), "--");
-        }
-        lv_label_set_text(block_fee_value, buf);
+        lv_label_set_text(block_halving_days_value, buf);
     }
+
 }
 
 static lv_obj_t *create_bottom_nav_btn(lv_obj_t *parent, const char *symbol, lv_event_cb_t event_cb, bool active)

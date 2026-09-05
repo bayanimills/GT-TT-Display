@@ -16,13 +16,29 @@
 #include "lwip/apps/sntp.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #define CLOCK_NVS_NS      "clock"
 #define CLOCK_NVS_24H     "use24h"
 #define CLOCK_NVS_TWIN    "twin"
+#define CLOCK_NVS_DIGITAL "digital"
+#define CLOCK_NVS_STAT0   "stat0"
+#define CLOCK_NVS_STAT1   "stat1"
 #define CLOCK_FACE_TICKS  12
+
+typedef enum {
+    CLOCK_STAT_PRICE = 0,
+    CLOCK_STAT_HASHRATE,
+    CLOCK_STAT_DIFFICULTY,
+    CLOCK_STAT_BLOCK,
+    CLOCK_STAT_HALVING_DAYS,
+    CLOCK_STAT_TEMPERATURE,
+    CLOCK_STAT_POWER,
+    CLOCK_STAT_BEST_DIFF,
+    CLOCK_STAT_COUNT
+} clock_stat_t;
 
 static lv_obj_t *clock_screen = NULL;
 static lv_obj_t *clock_time_cont = NULL;
@@ -36,7 +52,9 @@ static lv_timer_t *clock_timer = NULL;
  * clock and navigation untouched. */
 static bool clock_glass_mode = false;
 static bool clock_use_24h = false;
-static bool clock_twin_layout = false;
+static bool clock_twin_layout = true;
+static bool clock_digital_face = false;
+static uint8_t clock_stat_kind[2] = { CLOCK_STAT_PRICE, CLOCK_STAT_HASHRATE };
 static bool clock_prefs_loaded = false;
 static lv_obj_t *clock_display_card = NULL;
 static lv_obj_t *clock_display_content = NULL;
@@ -45,8 +63,9 @@ static lv_obj_t *clock_face = NULL;
 static lv_obj_t *clock_hour_hand = NULL;
 static lv_obj_t *clock_minute_hand = NULL;
 static lv_obj_t *clock_second_hand = NULL;
-static lv_obj_t *clock_price_label = NULL;
-static lv_obj_t *clock_hashrate_label = NULL;
+static lv_obj_t *clock_stat_value[2] = { NULL, NULL };
+static lv_obj_t *clock_stat_caption[2] = { NULL, NULL };
+static lv_obj_t *clock_face_buttons[2] = { NULL, NULL };
 static lv_obj_t *clock_format_buttons[2] = { NULL, NULL };
 static lv_obj_t *clock_layout_buttons[2] = { NULL, NULL };
 static lv_point_t clock_tick_points[CLOCK_FACE_TICKS][2];
@@ -70,6 +89,8 @@ static void clock_build_glass_display(void);
 static void clock_build_glass_settings(void);
 static void clock_update_analogue(const struct tm *time_info);
 static void clock_update_glass_stats(void);
+static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
+                                const lv_font_t *font);
 
 void clock_screen_create(void)
 {
@@ -98,7 +119,7 @@ void clock_screen_create(void)
         clock_prefs_load();
 
         clock_title_label = lv_label_create(clock_screen);
-        lv_label_set_text(clock_title_label, "LOCAL TIME");
+        lv_label_set_text(clock_title_label, "CLOCK");
         lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
         lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_24, 0);
         lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 12);
@@ -108,7 +129,9 @@ void clock_screen_create(void)
         clock_date_label = lv_label_create(clock_screen);
         lv_label_set_text(clock_date_label, current_date_text);
         lv_obj_set_style_text_color(clock_date_label, COLOR_TEXT_SECONDARY, 0);
-        lv_obj_set_style_text_font(clock_date_label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(clock_date_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_width(clock_date_label, 560);
+        lv_obj_set_style_text_align(clock_date_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(clock_date_label, LV_ALIGN_TOP_MID, 0, 43);
         lv_obj_clear_flag(clock_date_label, LV_OBJ_FLAG_CLICKABLE);
         glass_pill_label(clock_date_label, false);
@@ -124,7 +147,7 @@ void clock_screen_create(void)
     }
 
     clock_title_label = lv_label_create(clock_screen);
-    lv_label_set_text(clock_title_label, "LOCAL TIME");
+    lv_label_set_text(clock_title_label, "CLOCK");
     lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_24, 0);
     lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 14);
@@ -158,7 +181,7 @@ void clock_screen_create(void)
     lv_obj_align(parent, LV_ALIGN_TOP_MID, 0, 76);
 
     lv_obj_t *caption = lv_label_create(parent);
-    lv_label_set_text(caption, "CURRENT TIME");
+    lv_label_set_text(caption, "TIME");
     lv_obj_set_style_text_color(caption, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(caption, &lv_font_montserrat_14, 0);
     lv_obj_align(caption, LV_ALIGN_TOP_MID, 0, 24);
@@ -252,8 +275,9 @@ void clock_screen_destroy(void)
         clock_hour_hand = NULL;
         clock_minute_hand = NULL;
         clock_second_hand = NULL;
-        clock_price_label = NULL;
-        clock_hashrate_label = NULL;
+        memset(clock_stat_value, 0, sizeof(clock_stat_value));
+        memset(clock_stat_caption, 0, sizeof(clock_stat_caption));
+        memset(clock_face_buttons, 0, sizeof(clock_face_buttons));
         memset(clock_format_buttons, 0, sizeof(clock_format_buttons));
         memset(clock_layout_buttons, 0, sizeof(clock_layout_buttons));
         clock_face_size = 0;
@@ -284,7 +308,7 @@ static void clock_update_time_text(void)
     else
     {
         localtime_r(&now, &time_info);
-        strftime(current_date_text, sizeof(current_date_text), "%a, %d %b %Y", &time_info);
+        strftime(current_date_text, sizeof(current_date_text), "%A, %d %B %Y", &time_info);
     }
 
     if (clock_glass_mode && clock_use_24h)
@@ -343,6 +367,12 @@ static void clock_prefs_load(void)
         clock_use_24h = value != 0;
     if (nvs_get_u8(h, CLOCK_NVS_TWIN, &value) == ESP_OK)
         clock_twin_layout = value != 0;
+    if (nvs_get_u8(h, CLOCK_NVS_DIGITAL, &value) == ESP_OK)
+        clock_digital_face = value != 0;
+    if (nvs_get_u8(h, CLOCK_NVS_STAT0, &value) == ESP_OK && value < CLOCK_STAT_COUNT)
+        clock_stat_kind[0] = value;
+    if (nvs_get_u8(h, CLOCK_NVS_STAT1, &value) == ESP_OK && value < CLOCK_STAT_COUNT)
+        clock_stat_kind[1] = value;
     nvs_close(h);
 }
 
@@ -352,6 +382,9 @@ static void clock_prefs_save(void)
     if (nvs_open(CLOCK_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_set_u8(h, CLOCK_NVS_24H, clock_use_24h ? 1U : 0U);
     nvs_set_u8(h, CLOCK_NVS_TWIN, clock_twin_layout ? 1U : 0U);
+    nvs_set_u8(h, CLOCK_NVS_DIGITAL, clock_digital_face ? 1U : 0U);
+    nvs_set_u8(h, CLOCK_NVS_STAT0, clock_stat_kind[0]);
+    nvs_set_u8(h, CLOCK_NVS_STAT1, clock_stat_kind[1]);
     nvs_commit(h);
     nvs_close(h);
 }
@@ -391,6 +424,15 @@ static void clock_refresh_choices(void)
     clock_style_choice(clock_format_buttons[1], clock_use_24h);
     clock_style_choice(clock_layout_buttons[0], !clock_twin_layout);
     clock_style_choice(clock_layout_buttons[1], clock_twin_layout);
+    clock_style_choice(clock_face_buttons[0], !clock_digital_face);
+    clock_style_choice(clock_face_buttons[1], clock_digital_face);
+}
+
+static void clock_face_choice_cb(lv_event_t *e)
+{
+    clock_digital_face = (intptr_t)lv_event_get_user_data(e) != 0;
+    clock_prefs_save();
+    clock_refresh_choices();
 }
 
 static void clock_format_choice_cb(lv_event_t *e)
@@ -439,7 +481,7 @@ static lv_obj_t *clock_choice_button(lv_obj_t *parent, const char *text, int x, 
                                      lv_event_cb_t cb, intptr_t value)
 {
     lv_obj_t *button = lv_btn_create(parent);
-    lv_obj_set_size(button, 184, 62);
+    lv_obj_set_size(button, 184, 54);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 18, 0);
     lv_obj_set_style_border_width(button, 1, 0);
@@ -483,33 +525,69 @@ static void clock_build_glass_settings(void)
                                        &lv_font_montserrat_24, COLOR_TEXT_PRIMARY);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 27);
 
+    lv_obj_t *face_caption = clock_text_label(clock_settings_card, "CLOCK FACE",
+                                               &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
+    lv_obj_set_pos(face_caption, 38, 83);
+    clock_face_buttons[0] = clock_choice_button(clock_settings_card, "ANALOGUE", 292, 60,
+                                                clock_face_choice_cb, 0);
+    clock_face_buttons[1] = clock_choice_button(clock_settings_card, "DIGITAL", 488, 60,
+                                                clock_face_choice_cb, 1);
+
     lv_obj_t *format_caption = clock_text_label(clock_settings_card, "TIME FORMAT",
-                                                &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
-    lv_obj_set_pos(format_caption, 38, 104);
-    clock_format_buttons[0] = clock_choice_button(clock_settings_card, "12 HOUR", 292, 82,
-                                                  clock_format_choice_cb, 0);
-    clock_format_buttons[1] = clock_choice_button(clock_settings_card, "24 HOUR", 488, 82,
-                                                  clock_format_choice_cb, 1);
+                                                 &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
+    lv_obj_set_pos(format_caption, 38, 165);
+    clock_format_buttons[0] = clock_choice_button(clock_settings_card, "12 HOUR", 292, 142,
+                                                   clock_format_choice_cb, 0);
+    clock_format_buttons[1] = clock_choice_button(clock_settings_card, "24 HOUR", 488, 142,
+                                                   clock_format_choice_cb, 1);
 
     lv_obj_t *layout_caption = clock_text_label(clock_settings_card, "CLOCK LAYOUT",
-                                                &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
-    lv_obj_set_pos(layout_caption, 38, 202);
-    clock_layout_buttons[0] = clock_choice_button(clock_settings_card, "SINGLE", 292, 180,
-                                                  clock_layout_choice_cb, 0);
-    clock_layout_buttons[1] = clock_choice_button(clock_settings_card, "TWIN", 488, 180,
-                                                  clock_layout_choice_cb, 1);
+                                                 &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
+    lv_obj_set_pos(layout_caption, 38, 247);
+    clock_layout_buttons[0] = clock_choice_button(clock_settings_card, "SINGLE", 292, 224,
+                                                   clock_layout_choice_cb, 0);
+    clock_layout_buttons[1] = clock_choice_button(clock_settings_card, "TWIN", 488, 224,
+                                                   clock_layout_choice_cb, 1);
 
     lv_obj_t *hint = clock_text_label(clock_settings_card,
-                                      "Twin adds live BTC price and miner hashrate.",
+                                      "In Twin view, tap either right card to rotate its metric.",
                                       &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);
 
     clock_refresh_choices();
     lv_obj_add_flag(clock_settings_card, LV_OBJ_FLAG_HIDDEN);
 }
 
-static lv_obj_t *clock_stat_card(lv_obj_t *parent, const char *caption, int y,
-                                 lv_obj_t **value_out)
+static const char *clock_stat_name(clock_stat_t kind)
+{
+    static const char *name[CLOCK_STAT_COUNT] = {
+        "BITCOIN RATE  -  TAP", "MINER HASHRATE  -  TAP",
+        "NETWORK DIFFICULTY  -  TAP", "BLOCK HEIGHT  -  TAP",
+        "DAYS TO HALVING  -  TAP", "ASIC TEMPERATURE  -  TAP",
+        "POWER  -  TAP", "BEST DIFFICULTY  -  TAP",
+    };
+    return kind < CLOCK_STAT_COUNT ? name[kind] : "METRIC  -  TAP";
+}
+
+static void clock_rebuild_display_async(void *unused)
+{
+    (void)unused;
+    clock_build_glass_display();
+    clock_update_time_text();
+}
+
+static void clock_stat_clicked(lv_event_t *e)
+{
+    const int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    if (slot < 0 || slot > 1) return;
+    do {
+        clock_stat_kind[slot] = (uint8_t)((clock_stat_kind[slot] + 1) % CLOCK_STAT_COUNT);
+    } while (clock_stat_kind[slot] == clock_stat_kind[1 - slot]);
+    clock_prefs_save();
+    lv_async_call(clock_rebuild_display_async, NULL);
+}
+
+static lv_obj_t *clock_stat_card(lv_obj_t *parent, int slot, int y)
 {
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_size(card, 322, 120);
@@ -522,12 +600,21 @@ static lv_obj_t *clock_stat_card(lv_obj_t *parent, const char *caption, int y,
     lv_obj_set_style_border_width(card, 1, 0);
     lv_obj_set_style_shadow_width(card, 0, 0);
     lv_obj_set_style_pad_all(card, 0, 0);
-    lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(card, COLOR_ACCENT, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(card, LV_OPA_20, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(card, clock_stat_clicked, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)slot);
 
-    lv_obj_t *cap = clock_text_label(card, caption, &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
-    lv_obj_set_pos(cap, 22, 18);
-    *value_out = clock_text_label(card, "--", &lv_font_montserrat_32, COLOR_TEXT_PRIMARY);
-    lv_obj_set_pos(*value_out, 22, 53);
+    clock_stat_caption[slot] = clock_text_label(card,
+                                                clock_stat_name((clock_stat_t)clock_stat_kind[slot]),
+                                                &lv_font_montserrat_12,
+                                                COLOR_TEXT_SECONDARY);
+    lv_obj_set_pos(clock_stat_caption[slot], 22, 18);
+    clock_stat_value[slot] = clock_text_label(card, "--", &lv_font_montserrat_32,
+                                              COLOR_TEXT_PRIMARY);
+    lv_obj_set_pos(clock_stat_value[slot], 22, 53);
     return card;
 }
 
@@ -615,6 +702,30 @@ static void clock_build_face(lv_obj_t *parent, int x, int y, int size)
     lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, -7, 0);
 }
 
+static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
+                                const lv_font_t *font)
+{
+    clock_time_cont = lv_obj_create(parent);
+    lv_obj_set_size(clock_time_cont, w, h);
+    lv_obj_set_pos(clock_time_cont, x, y);
+    lv_obj_set_style_radius(clock_time_cont, 24, 0);
+    lv_obj_set_style_bg_color(clock_time_cont, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(clock_time_cont, LV_OPA_10, 0);
+    lv_obj_set_style_border_color(clock_time_cont, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(clock_time_cont, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(clock_time_cont, 1, 0);
+    lv_obj_set_style_shadow_width(clock_time_cont, 0, 0);
+    lv_obj_set_style_pad_all(clock_time_cont, 0, 0);
+    lv_obj_clear_flag(clock_time_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    clock_time_label = clock_text_label(clock_time_cont, current_time_text,
+                                        font, COLOR_TEXT_PRIMARY);
+    lv_obj_align(clock_time_label, LV_ALIGN_CENTER, clock_use_24h ? 0 : -18, 0);
+    clock_ampm_label = clock_text_label(clock_time_cont, current_ampm_text,
+                                        &lv_font_montserrat_24, COLOR_TEXT_SECONDARY);
+    lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, -24, 18);
+}
+
 static void clock_build_glass_display(void)
 {
     if (!clock_screen) return;
@@ -650,23 +761,26 @@ static void clock_build_glass_display(void)
     clock_time_cont = NULL;
     clock_time_label = NULL;
     clock_ampm_label = NULL;
-    clock_price_label = NULL;
-    clock_hashrate_label = NULL;
+    memset(clock_stat_value, 0, sizeof(clock_stat_value));
+    memset(clock_stat_caption, 0, sizeof(clock_stat_caption));
 
     if (clock_twin_layout)
     {
-        clock_build_face(clock_display_content, 64, 35, 252);
-        char price_caption[24];
-        lv_snprintf(price_caption, sizeof(price_caption), "BTC / %s", chain_ccy_code(chain_get_ccy()));
-        clock_stat_card(clock_display_content, price_caption, 34, &clock_price_label);
-        clock_stat_card(clock_display_content, "MINER HASHRATE", 168, &clock_hashrate_label);
+        if (clock_digital_face)
+            clock_build_digital(clock_display_content, 34, 35, 298, 252,
+                                &lv_font_montserrat_48);
+        else
+            clock_build_face(clock_display_content, 64, 35, 252);
+        clock_stat_card(clock_display_content, 0, 34);
+        clock_stat_card(clock_display_content, 1, 168);
     }
     else
     {
-        clock_build_face(clock_display_content, 224, 20, 282);
-        lv_obj_t *hint = clock_text_label(clock_display_content, "Tap clock for display options",
-                                          &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
-        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -10);
+        if (clock_digital_face)
+            clock_build_digital(clock_display_content, 52, 24, 640, 274,
+                                &montserrat_140);
+        else
+            clock_build_face(clock_display_content, 224, 20, 282);
     }
 }
 
@@ -705,17 +819,54 @@ static void clock_update_glass_stats(void)
 {
     if (!clock_twin_layout) return;
 
-    char value[48];
-    const char *price = price_get_text();
-    lv_snprintf(value, sizeof(value), "%s%s", chain_ccy_prefix(chain_get_ccy()),
-                (price && price[0]) ? price : "--");
-    clock_set_label_if_changed(clock_price_label, value);
-
     const home_stats_t *stats = home_stats();
-    const char *hashrate = stats ? stats->hashrate : NULL;
-    lv_snprintf(value, sizeof(value), "%s GH/s",
-                (hashrate && hashrate[0]) ? hashrate : "--");
-    clock_set_label_if_changed(clock_hashrate_label, value);
+    const chain_data_t *chain = chain_data();
+    for (int slot = 0; slot < 2; slot++)
+    {
+        char value[48] = "--";
+        switch ((clock_stat_t)clock_stat_kind[slot])
+        {
+            case CLOCK_STAT_PRICE: {
+                const char *price = price_get_text();
+                lv_snprintf(value, sizeof(value), "%s%s", chain_ccy_prefix(chain_get_ccy()),
+                            (price && price[0]) ? price : "--");
+                break;
+            }
+            case CLOCK_STAT_HASHRATE: {
+                const double ghs = (stats && stats->hashrate) ? strtod(stats->hashrate, NULL) : 0.0;
+                if (ghs >= 1000.0) snprintf(value, sizeof(value), "%.2f TH/s", ghs / 1000.0);
+                else if (ghs > 0.0) snprintf(value, sizeof(value), "%.0f GH/s", ghs);
+                break;
+            }
+            case CLOCK_STAT_DIFFICULTY:
+                if (chain->difficulty > 0.0) chain_fmt_compact(chain->difficulty, value, sizeof(value));
+                break;
+            case CLOCK_STAT_BLOCK: {
+                const long height = strtol(block_get_height_text(), NULL, 10);
+                if (height > 0) chain_fmt_grouped(height, value, sizeof(value));
+                break;
+            }
+            case CLOCK_STAT_HALVING_DAYS:
+                if (chain->blocks_to_halving > 0)
+                    snprintf(value, sizeof(value), "%.0f days", chain->days_to_halving);
+                break;
+            case CLOCK_STAT_TEMPERATURE:
+                if (stats && stats->temperature && stats->temperature[0])
+                    lv_snprintf(value, sizeof(value), "%s", stats->temperature);
+                break;
+            case CLOCK_STAT_POWER:
+                if (stats && stats->power && stats->power[0])
+                    lv_snprintf(value, sizeof(value), "%s", stats->power);
+                break;
+            case CLOCK_STAT_BEST_DIFF:
+                if (stats && stats->best_diff && stats->best_diff[0])
+                    lv_snprintf(value, sizeof(value), "%s", stats->best_diff);
+                break;
+            default:
+                break;
+        }
+        clock_set_label_if_changed(clock_stat_value[slot], value);
+    }
 }
 
 static void clock_start_sntp(void)

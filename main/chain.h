@@ -82,6 +82,15 @@ typedef struct {
     float    price_history[CHAIN_PRICE_HISTORY];
     int      price_history_len;
 
+    /* Bitview publishes ready-made annualised price returns for selected
+     * horizons. These are the strongest currently available result within
+     * each requested band (4/5/6 years and 8/10 years respectively). */
+    double   price_cagr_short;
+    double   price_cagr_long;
+    uint8_t  price_cagr_short_years;
+    uint8_t  price_cagr_long_years;
+    bool     price_cagr_valid;
+
     bool     valid;               /* a fetch has succeeded at least once */
     int64_t  fetched_at;          /* time() of that fetch, 0 if never */
 } chain_data_t;

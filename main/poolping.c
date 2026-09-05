@@ -31,8 +31,8 @@ static const pool_entry_t k_pools[] = {
 
 /* Long enough for a slow path across the world, short enough that six of them
  * in series does not make the screen feel stuck. */
-#define CONNECT_TIMEOUT_MS 3000
-#define SWEEP_INTERVAL_MS  (15 * 1000)
+#define CONNECT_TIMEOUT_MS 750
+#define SWEEP_INTERVAL_MS  (5 * 1000)
 
 static int          s_latency[POOL_COUNT];
 static int64_t      s_last_sweep_us = 0;
@@ -157,6 +157,7 @@ static void poolping_task(void *arg)
             continue;
         }
 
+        const int64_t sweep_started_us = esp_timer_get_time();
         for (int i = 0; i < POOL_COUNT; i++) {
             s_latency[i] = measure_one(&k_pools[i]);
             /* Yield between pools: six connects back to back would hold the
@@ -169,7 +170,13 @@ static void poolping_task(void *arg)
                  k_pools[poolping_ranked(0)].label,
                  s_latency[poolping_ranked(0)]);
 
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(SWEEP_INTERVAL_MS));
+        /* Keep sweeps on a five-second cadence rather than sleeping five
+         * seconds after the measurements. The bounded per-host timeout keeps
+         * a completely unreachable set within one cadence. */
+        const int elapsed_ms = (int)((esp_timer_get_time() - sweep_started_us) / 1000);
+        const int wait_ms = elapsed_ms < SWEEP_INTERVAL_MS
+                              ? SWEEP_INTERVAL_MS - elapsed_ms : 1;
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
     }
 }
 

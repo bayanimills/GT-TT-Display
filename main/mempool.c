@@ -61,6 +61,7 @@ typedef struct
 
 static lv_obj_t *mempool_screen = NULL;
 static lv_obj_t *mempool_status_label = NULL;
+static lv_obj_t *mempool_source_label = NULL;
 static lv_obj_t *mempool_row = NULL;
 static lv_obj_t *mempool_fee_value[4] = { NULL, NULL, NULL, NULL };
 static lv_timer_t *mempool_fee_timer = NULL;
@@ -190,6 +191,19 @@ void mempool_screen_create(void)
     lv_obj_set_scrollbar_mode(mempool_row, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_flex_flow(mempool_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(mempool_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    if (glass)
+    {
+        /* Centre this directly below the middle recent-block card and just
+         * above the bottom Settings affordance, so it reads as attribution
+         * rather than as part of a block. */
+        mempool_source_label = lv_label_create(mempool_screen);
+        lv_label_set_text(mempool_source_label, chain_source_name(chain_get_source()));
+        lv_obj_set_style_text_color(mempool_source_label, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(mempool_source_label, &lv_font_montserrat_12, 0);
+        lv_obj_align(mempool_source_label, LV_ALIGN_BOTTOM_MID, 0, -20);
+        glass_pill_label(mempool_source_label, false);
+    }
 
     if (glass)
     {
@@ -325,25 +339,17 @@ static void mempool_refresh_fees(void)
         lv_label_set_text(mempool_fee_value[i], buf);
     }
 
-    /* The backlog belongs with the status line: it is what the feed says
-     * about right now, and a row of its own cost the cards their captions. */
-    if (mempool_status_label && d->mempool_tx_count > 0)
+    /* Keep queue size/vsize out of this deliberately calm header. The four
+     * fee bands and recent blocks already carry the useful detail. */
+    if (mempool_status_label && mempool_block_count > 0)
     {
-        char n[24];
-        chain_fmt_grouped(d->mempool_tx_count, n, sizeof(n));
-        snprintf(buf, sizeof(buf), "%s  -  %s waiting  -  %.1f vMB",
-                 chain_source_name(chain_get_source()), n,
-                 (double) d->mempool_vsize / 1000000.0);
-        lv_label_set_text(mempool_status_label, buf);
-    }
-    else if (mempool_status_label && mempool_block_count > 0)
-    {
-        snprintf(buf, sizeof(buf), "%s  -  %d RECENT BLOCKS",
-                 chain_source_name(chain_get_source()),
+        snprintf(buf, sizeof(buf), "%d RECENT BLOCKS",
                  mempool_block_count < MEMPOOL_VISIBLE_BLOCKS
                     ? mempool_block_count : MEMPOOL_VISIBLE_BLOCKS);
         lv_label_set_text(mempool_status_label, buf);
     }
+    if (mempool_source_label)
+        lv_label_set_text(mempool_source_label, chain_source_name(chain_get_source()));
 }
 
 void mempool_screen_destroy(void)
@@ -360,6 +366,7 @@ void mempool_screen_destroy(void)
         lv_obj_del(mempool_screen);
         mempool_screen = NULL;
         mempool_status_label = NULL;
+        mempool_source_label = NULL;
         mempool_row = NULL;
     }
 }

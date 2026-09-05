@@ -67,11 +67,9 @@ static lv_obj_t *price_ccy_buttons[CHAIN_CCY_COUNT] = { NULL };
 static TaskHandle_t price_task_handle = NULL;
 static bool price_netif_ready = false;
 
-/* lv_line does not copy its points, so the array has to outlive the call. */
-static lv_point_t  price_spark_pts[CHAIN_PRICE_HISTORY];
-static lv_obj_t   *price_spark_line = NULL;
-static lv_obj_t   *price_spark_range = NULL;
-static lv_timer_t *price_spark_timer = NULL;
+static lv_obj_t   *price_cagr_value[2] = { NULL, NULL };
+static lv_obj_t   *price_cagr_caption[2] = { NULL, NULL };
+static lv_timer_t *price_cagr_timer = NULL;
 
 static char current_price_text[32] = "--";
 static char current_price_status[24] = "LOADING...";
@@ -89,8 +87,8 @@ static bool price_ensure_netif(void);
 static bool price_wifi_connected(void);
 static void format_price_with_commas(long long value, char *out, size_t out_size);
 static void price_set_status(const char *status);
-static void price_build_sparkline(lv_obj_t *parent);
-static void price_refresh_sparkline(void);
+static void price_build_cagr_cards(lv_obj_t *parent, bool glass);
+static void price_refresh_cagr(void);
 static void price_build_glass_settings(void);
 static void price_glass_open_settings(lv_event_t *e);
 static void price_glass_close_settings(lv_event_t *e);
@@ -127,7 +125,7 @@ void price_currency_changed(void)
 
     if (price_title_label)
     {
-        lv_label_set_text_fmt(price_title_label, "BTC PRICE (%s)", chain_ccy_code(ccy));
+        lv_label_set_text_fmt(price_title_label, "Bitcoin Exchange Rate (%s)", chain_ccy_code(ccy));
     }
     if (price_prefix_label)
     {
@@ -169,82 +167,70 @@ static esp_err_t price_http_event_handler(esp_http_client_event_t *evt)
 #define SPARK_W 600
 #define SPARK_H 64
 
-static void price_spark_timer_cb(lv_timer_t *t)
+static void price_cagr_timer_cb(lv_timer_t *t)
 {
     (void) t;
-    price_refresh_sparkline();
+    price_refresh_cagr();
 }
 
-/* A month of daily closes under the figure. The price alone says nothing
- * about direction, which is most of what anyone glancing at it wants. */
-static void price_build_sparkline(lv_obj_t *parent)
+static lv_obj_t *price_cagr_card(lv_obj_t *parent, int index, const char *caption,
+                                 int x, bool glass)
 {
-    price_spark_line = lv_line_create(parent);
-    lv_obj_set_size(price_spark_line, SPARK_W, SPARK_H);
-    lv_obj_set_style_line_width(price_spark_line, 2, 0);
-    lv_obj_set_style_line_color(price_spark_line, COLOR_ACCENT, 0);
-    lv_obj_set_style_line_rounded(price_spark_line, true, 0);
-    lv_obj_align(price_spark_line, LV_ALIGN_BOTTOM_MID, 0, -50);
-    lv_obj_add_flag(price_spark_line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_set_size(card, 318, 88);
+    lv_obj_set_pos(card, x, 198);
+    lv_obj_set_style_radius(card, 18, 0);
+    lv_obj_set_style_bg_color(card, glass ? lv_color_white() : COLOR_BACKGROUND, 0);
+    lv_obj_set_style_bg_opa(card, glass ? LV_OPA_10 : LV_OPA_50, 0);
+    lv_obj_set_style_border_color(card, glass ? lv_color_white() : COLOR_BORDER, 0);
+    lv_obj_set_style_border_opa(card, glass ? LV_OPA_30 : LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_shadow_width(card, 0, 0);
+    lv_obj_set_style_pad_all(card, 0, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
-    price_spark_range = lv_label_create(parent);
-    lv_label_set_text(price_spark_range, "");
-    lv_obj_set_style_text_color(price_spark_range, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(price_spark_range, &lv_font_montserrat_14, 0);
-    lv_obj_align(price_spark_range, LV_ALIGN_BOTTOM_MID, 0, -20);
+    price_cagr_caption[index] = lv_label_create(card);
+    lv_label_set_text(price_cagr_caption[index], caption);
+    lv_obj_set_style_text_color(price_cagr_caption[index], COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(price_cagr_caption[index], &lv_font_montserrat_14, 0);
+    lv_obj_align(price_cagr_caption[index], LV_ALIGN_TOP_MID, 0, 10);
 
-    price_spark_timer = lv_timer_create(price_spark_timer_cb, 5000, NULL);
-    price_refresh_sparkline();
+    price_cagr_value[index] = lv_label_create(card);
+    lv_label_set_text(price_cagr_value[index], "--");
+    lv_obj_set_style_text_color(price_cagr_value[index], COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(price_cagr_value[index], &lv_font_montserrat_32, 0);
+    lv_obj_align(price_cagr_value[index], LV_ALIGN_BOTTOM_MID, 0, -10);
+    return card;
 }
 
-static void price_refresh_sparkline(void)
+static void price_build_cagr_cards(lv_obj_t *parent, bool glass)
 {
-    if (!price_spark_line || !price_spark_range)
-    {
-        return;
-    }
+    price_cagr_card(parent, 0, "BEST 4-6 YEAR CAGR", 44, glass);
+    price_cagr_card(parent, 1, "BEST 7-10 YEAR CAGR", 382, glass);
+    price_cagr_timer = lv_timer_create(price_cagr_timer_cb, 5000, NULL);
+    price_refresh_cagr();
+}
 
+static void price_refresh_cagr(void)
+{
     const chain_data_t *d = chain_data();
-    const int n = d->price_history_len;
-
-    /* Two points is the fewest that can show a direction, and the closes are
-     * bitview only, so the classic case for hiding this is mempool.space. */
-    if (n < 2)
+    if (!price_cagr_value[0] || !price_cagr_value[1]) return;
+    if (!d->price_cagr_valid)
     {
-        lv_obj_add_flag(price_spark_line, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(price_spark_range, "");
+        lv_label_set_text(price_cagr_value[0], "--");
+        lv_label_set_text(price_cagr_value[1], "--");
         return;
     }
-
-    float lo = d->price_history[0];
-    float hi = d->price_history[0];
-    for (int i = 1; i < n; i++)
-    {
-        if (d->price_history[i] < lo) lo = d->price_history[i];
-        if (d->price_history[i] > hi) hi = d->price_history[i];
-    }
-
-    const float span = (hi > lo) ? (hi - lo) : 1.0f;
-    for (int i = 0; i < n; i++)
-    {
-        price_spark_pts[i].x = (lv_coord_t) (i * (SPARK_W - 1) / (n - 1));
-        /* A flat month would otherwise pin to the top; centre it instead. */
-        const float t = (hi > lo) ? (d->price_history[i] - lo) / span : 0.5f;
-        price_spark_pts[i].y = (lv_coord_t) ((1.0f - t) * (SPARK_H - 1));
-    }
-
-    lv_line_set_points(price_spark_line, price_spark_pts, (uint16_t) n);
-    lv_obj_clear_flag(price_spark_line, LV_OBJ_FLAG_HIDDEN);
-
-    /* The chart has no axis, so the extremes have to be written down or the
-     * shape is unreadable: the same curve fits any pair of numbers. */
-    char lo_s[24], hi_s[24], buf[72];
-    chain_fmt_grouped((long) (lo * chain_fx_to_usd() + 0.5), lo_s, sizeof(lo_s));
-    chain_fmt_grouped((long) (hi * chain_fx_to_usd() + 0.5), hi_s, sizeof(hi_s));
-    snprintf(buf, sizeof(buf), "%d days   %s%s  to  %s%s", n,
-             chain_ccy_prefix(chain_get_ccy()), lo_s,
-             chain_ccy_prefix(chain_get_ccy()), hi_s);
-    lv_label_set_text(price_spark_range, buf);
+    /* LVGL's formatter intentionally omits floating-point support on-device;
+     * format with libc first so live values never degrade to the literal
+     * `f%` seen in the offline placeholder screenshot. */
+    char value[32];
+    snprintf(value, sizeof(value), "%.1f%%  -  %uY",
+             d->price_cagr_short, (unsigned)d->price_cagr_short_years);
+    lv_label_set_text(price_cagr_value[0], value);
+    snprintf(value, sizeof(value), "%.1f%%  -  %uY",
+             d->price_cagr_long, (unsigned)d->price_cagr_long_years);
+    lv_label_set_text(price_cagr_value[1], value);
 }
 
 void price_screen_create(void)
@@ -269,7 +255,7 @@ void price_screen_create(void)
     }
 
     price_title_label = lv_label_create(price_screen);
-    lv_label_set_text_fmt(price_title_label, "BTC PRICE (%s)",
+    lv_label_set_text_fmt(price_title_label, "Bitcoin Exchange Rate (%s)",
                           chain_ccy_code(chain_get_ccy()));
     lv_obj_set_style_text_color(price_title_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(price_title_label, &lv_font_montserrat_24, 0);
@@ -352,7 +338,7 @@ void price_screen_create(void)
     lv_obj_set_style_text_opa(price_suffix_label, (lv_opa_t)192, 0);
     lv_obj_set_style_text_font(price_suffix_label, &lv_font_montserrat_48, 0);
 
-    price_build_sparkline(parent);
+    price_build_cagr_cards(parent, glass);
 
     if (glass)
     {
@@ -532,13 +518,13 @@ static void price_build_glass_settings(void)
 
 void price_screen_destroy(void)
 {
-    if (price_spark_timer)
+    if (price_cagr_timer)
     {
-        lv_timer_del(price_spark_timer);
-        price_spark_timer = NULL;
+        lv_timer_del(price_cagr_timer);
+        price_cagr_timer = NULL;
     }
-    price_spark_line = NULL;
-    price_spark_range = NULL;
+    memset(price_cagr_value, 0, sizeof(price_cagr_value));
+    memset(price_cagr_caption, 0, sizeof(price_cagr_caption));
     if (price_screen)
     {
         glass_screen_detach(price_screen);

@@ -152,6 +152,11 @@ void chain_set_source(chain_source_t src)
     {
         s_data.hashprice_usd_ths  = 0.0;
         s_data.hashvalue_sats_ths = 0.0;
+        s_data.price_cagr_short = 0.0;
+        s_data.price_cagr_long = 0.0;
+        s_data.price_cagr_short_years = 0;
+        s_data.price_cagr_long_years = 0;
+        s_data.price_cagr_valid = false;
         lvgl_port_unlock();
     }
     if (s_task)
@@ -674,6 +679,65 @@ static bool chain_fetch_price_history(chain_data_t *d)
     return n > 0;
 }
 
+/* Bitview exposes CAGR series directly, avoiding a multi-kilobyte decade of
+ * daily closes and extra arithmetic on the display. It currently publishes
+ * 4/5/6-year and 8/10-year horizons; the latter are the available members of
+ * the requested 7-10-year band. */
+static bool chain_parse_price_cagr(const char *body, chain_data_t *d)
+{
+    if (!body || !d)
+        return false;
+    d->price_cagr_valid = false;
+    d->price_cagr_short_years = 0;
+    d->price_cagr_long_years = 0;
+
+    static const uint8_t years[5] = { 4, 5, 6, 8, 10 };
+    double best_short = -INFINITY;
+    double best_long = -INFINITY;
+    uint8_t best_short_years = 0;
+    uint8_t best_long_years = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        double value = 0.0;
+        if (!vecs_nth(body, i, &value) || !isfinite(value))
+            continue;
+        if (i < 3 && value > best_short)
+        {
+            best_short = value;
+            best_short_years = years[i];
+        }
+        else if (i >= 3 && value > best_long)
+        {
+            best_long = value;
+            best_long_years = years[i];
+        }
+    }
+
+    if (!best_short_years || !best_long_years)
+        return false;
+    d->price_cagr_short = best_short;
+    d->price_cagr_long = best_long;
+    d->price_cagr_short_years = best_short_years;
+    d->price_cagr_long_years = best_long_years;
+    d->price_cagr_valid = true;
+    return true;
+}
+
+static bool chain_fetch_price_cagr(chain_data_t *d)
+{
+    d->price_cagr_valid = false;
+    if (s_source != CHAIN_SRC_BITVIEW)
+        return false;
+
+    char url[320];
+    snprintf(url, sizeof(url),
+             "%s/api/vecs/query?i=day1&f=-1"
+             "&ids=price_cagr_4y,price_cagr_5y,price_cagr_6y,"
+             "price_cagr_8y,price_cagr_10y",
+             chain_base_url());
+    return chain_get(url) && chain_parse_price_cagr(s_http_buf, d);
+}
+
 /* Balance of the watched address. Skipped entirely when none is set. */
 static bool chain_fetch_address(void)
 {
@@ -760,6 +824,7 @@ static bool chain_fetch_once(void)
     chain_fetch_fees(&next);
     chain_fetch_mempool_backlog(&next);
     chain_fetch_price_history(&next);
+    chain_fetch_price_cagr(&next);
 
     if (!got_chain && !next.valid)
     {

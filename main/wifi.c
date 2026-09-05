@@ -26,6 +26,8 @@
 
 static const char* TAG = "wifi_screen";
 
+static void wifi_glass_back_clicked(lv_event_t *e) { (void)e; glass_goto(GLASS_SCREEN_SETTINGS); }
+
 static wifi_ap_record_t *scan_results = NULL;
 static uint16_t scan_count = 0;
 static bool scan_in_progress = false;
@@ -568,6 +570,15 @@ void wifi_screen_create(void)
         wifi_screen = glass_screen_create(GLASS_SCREEN_WIFI, false);
         lv_obj_t * pane = glass_pane(wifi_screen, SCREEN_WIDTH - 48, SCREEN_HEIGHT - 44, 28);
         lv_obj_align(pane, LV_ALIGN_TOP_MID, 0, 22);
+        lv_obj_t *back = lv_btn_create(pane);
+        lv_obj_set_size(back, 150, 44);
+        lv_obj_align(back, LV_ALIGN_TOP_LEFT, 16, 10);
+        lv_obj_add_event_cb(back, wifi_glass_back_clicked, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *back_label = lv_label_create(back);
+        lv_label_set_text(back_label, LV_SYMBOL_LEFT "  BACK");
+        lv_obj_center(back_label);
+        glass_style_button(back, false);
+
         main_cont = lv_obj_create(pane);
         lv_obj_set_size(main_cont, SCREEN_WIDTH - 48, SCREEN_HEIGHT - 44);
         lv_obj_set_pos(main_cont, 0, 0);
@@ -576,6 +587,7 @@ void wifi_screen_create(void)
         lv_obj_set_style_pad_all(main_cont, 16, 0);
         lv_obj_clear_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_move_foreground(back);
     } else {
         wifi_screen = lv_obj_create(NULL);
         lv_obj_set_style_bg_color(wifi_screen, COLOR_BACKGROUND, 0);

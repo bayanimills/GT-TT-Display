@@ -63,6 +63,18 @@ int main(void)
           vecs_nth(gappy, 2, &v) && close_to(v, 7.25, 1e-12));
     check("garbage body is rejected", !vecs_nth("not json", 0, &v));
 
+    puts("price CAGR bands");
+    chain_data_t cagr = {0};
+    check("live five-series CAGR response parses",
+          chain_parse_price_cagr("[[41.2803],[8.9121],[40.7354],[36.900402],[62.7754]]",
+                                 &cagr));
+    check("4Y wins the 4-6Y band",
+          cagr.price_cagr_short_years == 4 && close_to(cagr.price_cagr_short, 41.2803, 1e-9));
+    check("10Y wins the available 7-10Y band",
+          cagr.price_cagr_long_years == 10 && close_to(cagr.price_cagr_long, 62.7754, 1e-9));
+    check("a missing band is rejected",
+          !chain_parse_price_cagr("[[41.0],[],[],[],[]]", &cagr));
+
     puts("json_get_double");
     const char *retarget = "{\"progressPercent\":79.81,\"difficultyChange\":"
                            "-1.3121909633418527,\"remainingBlocks\":407}";

@@ -33,6 +33,12 @@ jobs:
             -Icomponents/lvgl__lvgl tests/test_feed_web.c main/feed_web.c -o /tmp/feed_web
           /tmp/feed_web
           bash tests/test_settings_ui_contract.sh
+          bash tests/test_glass_data_ui_contract.sh
+          cc -std=gnu11 -DLV_CONF_INCLUDE_SIMPLE \
+            -Isim/stubs -Imain -Icomponents -Icomponents/lvgl__lvgl \
+            -Icomponents/lvgl__lvgl/src sim/test_chain.c sim/sim_rt.c \
+            -o /tmp/test_chain -lm -lpthread
+          /tmp/test_chain
       - name: Syntax-check hardware-only updater
         working-directory: sim
         run: |
