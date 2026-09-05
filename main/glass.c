@@ -1729,43 +1729,25 @@ static void drawer_toggle_cb(lv_event_t *e)
 
 static void drawer_grabber_cb(lv_event_t *e)
 {
-    static lv_point_t press;
-    static bool armed;
-    static bool moved;
-    lv_event_code_t code = lv_event_get_code(e);
+    static uint32_t last_navigation_at;
+    static bool has_navigated;
     lv_indev_t *indev = lv_indev_get_act();
 
-    if (code == LV_EVENT_PRESSED) {
-        armed = true;
-        moved = false;
-        if (indev) lv_indev_get_point(indev, &press);
-        return;
-    }
-    if (code == LV_EVENT_PRESSING && armed && indev) {
-        lv_point_t point;
-        lv_indev_get_point(indev, &point);
-        int32_t dx = point.x - press.x;
-        int32_t dy = point.y - press.y;
-        if (dx < -10 || dx > 10 || dy < -10 || dy > 10) moved = true;
-        return;
-    }
-    if (code == LV_EVENT_PRESS_LOST) {
-        armed = false;
-        return;
-    }
-    if (code != LV_EVENT_CLICKED || !armed) return;
-    armed = false;
-    if (moved) return;
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
 
-    /* Navigate only after a completed tap. Changing screens during GESTURE
-     * leaves the pointer down and lets its later release hit the replacement
-     * screen's grabber, immediately toggling back. */
+    /* Some touch controllers briefly repeat the release at the same point.
+     * Since every Glass screen has a grabber in that position, the repeated
+     * click can otherwise navigate to Settings and immediately back again. */
+    if (has_navigated && lv_tick_elaps(last_navigation_at) < 500U) return;
+    has_navigated = true;
+    last_navigation_at = lv_tick_get();
+
     glass_screen_t target = s_host_kind == GLASS_SCREEN_SETTINGS
                                 ? GLASS_SCREEN_HOME : GLASS_SCREEN_SETTINGS;
-    /* The pressed screen remains cached, so explicitly forget its input
-     * object before it becomes inactive. Otherwise LVGL can deliver the next
-     * pointer sample to that old grabber and toggle straight back. */
-    if (indev) lv_indev_reset(indev, NULL);
+    /* Consume any still-active hardware contact instead of resetting LVGL's
+     * pointer state mid-click. A reset here can retarget the same physical
+     * touch to the replacement screen. */
+    if (indev) lv_indev_wait_release(indev);
     glass_goto(target);
 }
 
@@ -2551,11 +2533,7 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
     lv_obj_set_style_border_width(grab_target, 0, 0);
     lv_obj_set_style_pad_all(grab_target, 0, 0);
     lv_obj_clear_flag(grab_target, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_add_flag(grab_target, LV_OBJ_FLAG_PRESS_LOCK);
-    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESS_LOST, NULL);
 
     lv_obj_t *grab = lv_obj_create(grab_target);
     lv_obj_set_size(grab, 56, 6);
@@ -2565,15 +2543,10 @@ lv_obj_t *glass_screen_create(glass_screen_t kind, bool dim)
     lv_obj_set_style_bg_opa(grab, dim ? LV_OPA_20 : LV_OPA_50, 0);
     lv_obj_set_style_border_width(grab, 0, 0);
     lv_obj_set_style_pad_all(grab, 0, 0);
-    /* The visible bar is a child of the generous target. Make it an equally
-     * valid target rather than allowing it to intercept the centre of the
-     * advertised tap area. Only one of these objects can own a press. */
-    lv_obj_clear_flag(grab, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_add_flag(grab, LV_OBJ_FLAG_PRESS_LOCK);
-    lv_obj_add_event_cb(grab, drawer_grabber_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(grab, drawer_grabber_cb, LV_EVENT_PRESSING, NULL);
-    lv_obj_add_event_cb(grab, drawer_grabber_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(grab, drawer_grabber_cb, LV_EVENT_PRESS_LOST, NULL);
+    /* Keep a single event owner. The bar is only a visual child of the larger
+     * target, so tapping its centre cannot produce child/parent callbacks. */
+    lv_obj_clear_flag(grab, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE |
+                            LV_OBJ_FLAG_GESTURE_BUBBLE);
     return scr;
 }
 

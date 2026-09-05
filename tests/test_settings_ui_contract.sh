@@ -73,14 +73,13 @@ rg -Fq '#define LV_DISP_DEF_REFR_PERIOD 25' "$lv_conf"
 rg -Fq '#define LV_INDEV_DEF_READ_PERIOD 10' "$lv_conf"
 rg -Fq '#define LV_USE_PERF_MONITOR 0' "$lv_conf"
 
-# Bottom navigation is tap-only. Handling GESTURE here navigates while the
-# pointer is still pressed, allowing its later click to toggle straight back.
-rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESSED, NULL)' "$glass_file"
-rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESSING, NULL)' "$glass_file"
+# Bottom navigation has one tap-only event owner. Navigating or resetting input
+# during pointer motion can retarget the same touch to the replacement screen.
 rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_CLICKED, NULL)' "$glass_file"
-rg -Fq 'lv_obj_add_event_cb(grab_target, drawer_grabber_cb, LV_EVENT_PRESS_LOST, NULL)' "$glass_file"
-if rg -q 'lv_obj_add_event_cb\(grab_target, drawer_grabber_cb, LV_EVENT_GESTURE' "$glass_file"; then
-    echo "Glass bottom navigation must not change screens during pointer motion" >&2
+rg -Fq 'lv_obj_clear_flag(grab, LV_OBJ_FLAG_CLICKABLE' "$glass_file"
+rg -Fq 'lv_indev_wait_release(indev)' "$glass_file"
+if rg -q 'lv_obj_add_event_cb\((grab_target|grab), drawer_grabber_cb, LV_EVENT_(PRESSED|PRESSING|PRESS_LOST|GESTURE)' "$glass_file"; then
+    echo "Glass bottom navigation must react only to the completed parent tap" >&2
     exit 1
 fi
 
