@@ -233,10 +233,13 @@ static void sim_theme_reload(void)
     lv_obj_set_style_bg_color(scratch, COLOR_BACKGROUND, 0);
     lv_scr_load(scratch);
 
-    /* Match the device's settings_rebuild_for_theme(): a skin/palette change
-     * invalidates every cached Glass screen, not only the one currently shown.
-     * Otherwise switching to Classic can later resurrect a Glass page. */
-    glass_screens_forget();
+    /* A direct simulator skin change can occur from any page, so do not rely
+     * on Glass' remembered host kind to identify the active cache entry. Purge
+     * every inactive screen explicitly or switching to Classic can later
+     * resurrect a cached Glass page. */
+    for (int i = 0; i < SCREEN_COUNT; i++) {
+        if (i != cur) k_screens[i].destroy();
+    }
     k_screens[cur].destroy();
     k_screens[cur].create();
     lv_scr_load(k_screens[cur].get());
