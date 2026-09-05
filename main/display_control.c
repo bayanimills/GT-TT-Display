@@ -19,6 +19,7 @@
 #define DISPLAY_NVS_DIM_KEY "disp_dim"
 #define DISPLAY_NVS_CORNER_KEY "disp_corner"
 #define DISPLAY_NVS_VISUALS_KEY "disp_icon"
+#define DISPLAY_NVS_BRIGHTNESS_KEY "disp_bright"
 #define DISPLAY_DEFAULT_OFF_MINUTE (22U * 60U)
 #define DISPLAY_DEFAULT_ON_MINUTE (7U * 60U)
 #define DISPLAY_DEFAULT_DIM_PERCENT 20U
@@ -54,6 +55,7 @@ static bool schedule_dim_active = false;
 static uint8_t normal_brightness = 100U;
 static bool sntp_started = false;
 static lv_timer_t *schedule_timer = NULL;
+static lv_timer_t *brightness_preview_timer = NULL;
 static lv_obj_t *power_button = NULL;
 static lv_obj_t *power_icon_parts[3] = { NULL, NULL, NULL };
 static bool button_visibility_requested = true;
@@ -72,6 +74,7 @@ static void display_control_set_backlight(bool enabled);
 static void display_control_apply_brightness(void);
 static void display_control_start_sntp_if_ready(void);
 static void display_control_timer_cb(lv_timer_t *timer);
+static void display_control_preview_timer_cb(lv_timer_t *timer);
 static void display_control_power_clicked(lv_event_t *event);
 
 esp_err_t display_control_init(void)
@@ -80,11 +83,12 @@ esp_err_t display_control_init(void)
         return ESP_OK;
     }
 
-    display_control_load_config();
     uint8_t detected_brightness = lcd_backlight_get_brightness();
     if (detected_brightness >= 5U && detected_brightness <= 100U) {
         normal_brightness = detected_brightness;
     }
+    /* A saved user preference wins over the panel driver's power-on level. */
+    display_control_load_config();
     initialized = true;
     backlight_on = true;
     schedule_timer = lv_timer_create(display_control_timer_cb, DISPLAY_TIMER_PERIOD_MS, NULL);
@@ -191,12 +195,53 @@ bool display_control_is_dimmed(void)
     return schedule_dim_active && backlight_on;
 }
 
+uint8_t display_control_get_brightness(void)
+{
+    return normal_brightness;
+}
+
 void display_control_set_brightness(uint8_t percent)
 {
     if (percent < 5U) percent = 5U;
     if (percent > 100U) percent = 100U;
     normal_brightness = percent;
     display_control_apply_brightness();
+}
+
+esp_err_t display_control_set_brightness_persisted(uint8_t percent)
+{
+    display_control_set_brightness(percent);
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(DISPLAY_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(handle, DISPLAY_NVS_BRIGHTNESS_KEY, normal_brightness);
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    return err;
+}
+
+void display_control_preview_brightness(uint8_t percent, uint32_t duration_ms)
+{
+    if (percent < 5U) percent = 5U;
+    if (percent > 100U) percent = 100U;
+    if (duration_ms == 0U) duration_ms = 5000U;
+
+    if (backlight_on) {
+        lcd_backlight_fade_to(percent, 120U);
+    }
+
+    if (!brightness_preview_timer) {
+        brightness_preview_timer = lv_timer_create(display_control_preview_timer_cb,
+                                                   duration_ms, NULL);
+        if (!brightness_preview_timer) {
+            display_control_apply_brightness();
+            return;
+        }
+        lv_timer_set_repeat_count(brightness_preview_timer, 1);
+    } else {
+        lv_timer_set_period(brightness_preview_timer, duration_ms);
+        lv_timer_reset(brightness_preview_timer);
+    }
 }
 
 bool display_control_handle_touch_wake(void)
@@ -245,6 +290,7 @@ static void display_control_load_config(void)
     uint16_t off_minute = DISPLAY_DEFAULT_OFF_MINUTE;
     uint16_t on_minute = DISPLAY_DEFAULT_ON_MINUTE;
     uint8_t dim_percent = DISPLAY_DEFAULT_DIM_PERCENT;
+    uint8_t brightness = normal_brightness;
     bool legacy_hidden = false;
 
     if (nvs_get_u8(handle, DISPLAY_NVS_ENABLED_KEY, &enabled) == ESP_OK) {
@@ -272,6 +318,10 @@ static void display_control_load_config(void)
     if (!legacy_hidden &&
         nvs_get_u8(handle, DISPLAY_NVS_VISUALS_KEY, &show_visuals) == ESP_OK) {
         current_config.power_button_visuals_visible = show_visuals != 0U;
+    }
+    if (nvs_get_u8(handle, DISPLAY_NVS_BRIGHTNESS_KEY, &brightness) == ESP_OK &&
+        brightness >= 5U && brightness <= 100U) {
+        normal_brightness = brightness;
     }
 
     nvs_close(handle);
@@ -438,6 +488,13 @@ static void display_control_apply_brightness(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set scheduled brightness: %s", esp_err_to_name(err));
     }
+}
+
+static void display_control_preview_timer_cb(lv_timer_t *timer)
+{
+    if (timer != brightness_preview_timer) return;
+    brightness_preview_timer = NULL;
+    display_control_apply_brightness();
 }
 
 static bool display_control_get_local_minute(uint16_t *minute_of_day)

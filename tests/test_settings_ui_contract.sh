@@ -86,4 +86,14 @@ if rg -q 'lv_obj_add_event_cb\((grab_target|grab), drawer_grabber_cb, LV_EVENT_(
     exit 1
 fi
 
+# Glass Display is a fixed button/toggle surface: no precision sliders and no
+# always-visible schedule controls.
+rg -Fq 'lv_label_set_text(bright_title, "Brightness")' "$settings_file"
+rg -Fq '"Display Toggle"' "$settings_file"
+rg -Fq '"Scheduled Dimming"' "$settings_file"
+rg -Fq 'glass_settings_brightness_step' "$settings_file"
+rg -Fq 'glass_settings_dim_step' "$settings_file"
+rg -Fq 'glass_settings_sync_display_controls' "$settings_file"
+rg -Fq 'display_control_preview_brightness((uint8_t)next, 5000U)' "$settings_file"
+
 echo "settings UI contract tests passed"

@@ -31,7 +31,7 @@ int main(void)
     assert(visible.show_visuals);
 
     display_button_visibility_t invisible = display_button_visibility_resolve(true, false);
-    assert(invisible.interactive);
+    assert(!invisible.interactive);
     assert(!invisible.show_visuals);
 
     display_button_visibility_t suppressed = display_button_visibility_resolve(false, true);

@@ -34,7 +34,12 @@ void display_control_get_config(display_control_config_t *config);
 esp_err_t display_control_set_config(const display_control_config_t *config);
 bool display_control_is_backlight_on(void);
 bool display_control_is_dimmed(void);
+uint8_t display_control_get_brightness(void);
 void display_control_set_brightness(uint8_t percent);
+esp_err_t display_control_set_brightness_persisted(uint8_t percent);
+/* Temporarily show a candidate level, then restore the normal or currently
+ * scheduled level. Safe to call repeatedly: the most recent preview wins. */
+void display_control_preview_brightness(uint8_t percent, uint32_t duration_ms);
 bool display_control_handle_touch_wake(void);
 
 /* Feed every raw touch sample through here from the indev read callback and
