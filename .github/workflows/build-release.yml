@@ -2,7 +2,9 @@ name: Build and release Firmware [release]
 
 on:
   release:
-    types: [released]
+    # Stable publications emit `released`; GitHub prereleases emit
+    # `prereleased`. Both need versioned factory/OTA assets.
+    types: [released, prereleased]
   push:
     branches:
     - main
