@@ -86,7 +86,7 @@ Protocol:     Custom BAP protocol for Bitaxe communication
 1. **Clone the repository**:
    ```bash
    git clone https://github.com/bayanimills/GT-TT-Display.git
-   cd 4.3LCD-ST7262-GT911
+   cd GT-TT-Display
    ```
 
 2. **Set ESP32-S3 target**:
@@ -160,7 +160,8 @@ Comprehensive configuration options:
 - **Network Config**: WiFi SSID/password setup
 - **Hardware Control**: ASIC voltage, automatic fan control
 - **System Info**: Firmware version, hardware details
-- **Firmware Channels**: check/install fork releases, or fetch and attempt an OTA restore to the latest official `bitaxeorg/BAP-GT-TOUCH` image through a separate confirmed action
+- **Firmware Channels**: choose stable or beta fork releases, set the automatic check cadence (manual, daily, or weekly), and check/install updates
+- **Original Firmware Restore**: fetch and attempt an OTA restore to the latest official `bitaxeorg/BAP-GT-TOUCH` image through a separate confirmed action
 
 The official restore attempt keeps NVS settings, binds the advertised version/name,
 and verifies the release asset's size and SHA-256 before selecting the new partition
@@ -480,8 +481,7 @@ This project is open source and available under the [GPL-V3 License](LICENSE).
 
 - **GitHub Issues**: Bug reports and feature requests
 - **Bitaxe Community**: Join the official Bitaxe Discord/forums
-- **Documentation**: Check the `docs/` folder for detailed guides
-- **Examples**: See `examples/` for usage demonstrations
+- **Documentation**: Start with this README, [`sim/README.md`](sim/README.md), and the API notes in `main/`
 
 ---
 
