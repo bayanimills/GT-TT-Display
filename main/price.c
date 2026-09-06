@@ -58,7 +58,6 @@ static lv_obj_t *price_screen = NULL;
 static lv_obj_t *price_value_cont = NULL;
 static lv_obj_t *price_prefix_label = NULL;
 static lv_obj_t *price_value_label = NULL;
-static lv_obj_t *price_suffix_label = NULL;
 static lv_obj_t *price_title_label = NULL;
 static lv_obj_t *price_status_label = NULL;
 static lv_obj_t *price_glass_card = NULL;
@@ -123,18 +122,9 @@ void price_currency_changed(void)
     strncpy(current_price_text, "--", sizeof(current_price_text) - 1);
     current_price_text[sizeof(current_price_text) - 1] = 0;
 
-    if (price_title_label)
-    {
-        lv_label_set_text_fmt(price_title_label, "Bitcoin Exchange Rate (%s)", chain_ccy_code(ccy));
-    }
     if (price_prefix_label)
     {
         lv_label_set_text(price_prefix_label, chain_ccy_prefix(ccy));
-    }
-    if (price_suffix_label)
-    {
-        lv_label_set_text(price_suffix_label,
-                          ccy == CHAIN_CCY_USD ? "" : chain_ccy_code(ccy));
     }
     if (price_value_label)
     {
@@ -205,8 +195,8 @@ static lv_obj_t *price_cagr_card(lv_obj_t *parent, int index, const char *captio
 
 static void price_build_cagr_cards(lv_obj_t *parent, bool glass)
 {
-    price_cagr_card(parent, 0, "BEST 4-6 YEAR CAGR", 44, glass);
-    price_cagr_card(parent, 1, "BEST 7-10 YEAR CAGR", 382, glass);
+    price_cagr_card(parent, 0, "CAGR", 44, glass);
+    price_cagr_card(parent, 1, "CAGR", 382, glass);
     price_cagr_timer = lv_timer_create(price_cagr_timer_cb, 5000, NULL);
     price_refresh_cagr();
 }
@@ -217,6 +207,8 @@ static void price_refresh_cagr(void)
     if (!price_cagr_value[0] || !price_cagr_value[1]) return;
     if (!d->price_cagr_valid)
     {
+        lv_label_set_text(price_cagr_caption[0], "CAGR");
+        lv_label_set_text(price_cagr_caption[1], "CAGR");
         lv_label_set_text(price_cagr_value[0], "--");
         lv_label_set_text(price_cagr_value[1], "--");
         return;
@@ -225,11 +217,18 @@ static void price_refresh_cagr(void)
      * format with libc first so live values never degrade to the literal
      * `f%` seen in the offline placeholder screenshot. */
     char value[32];
-    snprintf(value, sizeof(value), "%.1f%%  -  %uY",
-             d->price_cagr_short, (unsigned)d->price_cagr_short_years);
+    char caption[32];
+
+    snprintf(caption, sizeof(caption), "%u YEAR CAGR",
+             (unsigned)d->price_cagr_short_years);
+    lv_label_set_text(price_cagr_caption[0], caption);
+    snprintf(value, sizeof(value), "%.1f%%", d->price_cagr_short);
     lv_label_set_text(price_cagr_value[0], value);
-    snprintf(value, sizeof(value), "%.1f%%  -  %uY",
-             d->price_cagr_long, (unsigned)d->price_cagr_long_years);
+
+    snprintf(caption, sizeof(caption), "%u YEAR CAGR",
+             (unsigned)d->price_cagr_long_years);
+    lv_label_set_text(price_cagr_caption[1], caption);
+    snprintf(value, sizeof(value), "%.1f%%", d->price_cagr_long);
     lv_label_set_text(price_cagr_value[1], value);
 }
 
@@ -255,8 +254,7 @@ void price_screen_create(void)
     }
 
     price_title_label = lv_label_create(price_screen);
-    lv_label_set_text_fmt(price_title_label, "Bitcoin Exchange Rate (%s)",
-                          chain_ccy_code(chain_get_ccy()));
+    lv_label_set_text(price_title_label, "Bitcoin Exchange Rate");
     lv_obj_set_style_text_color(price_title_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(price_title_label, &lv_font_montserrat_24, 0);
     lv_obj_align(price_title_label, LV_ALIGN_TOP_MID, 0, 14);
@@ -295,12 +293,6 @@ void price_screen_create(void)
         lv_obj_add_flag(price_glass_card, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(price_glass_card, price_glass_open_settings,
                             LV_EVENT_CLICKED, NULL);
-        lv_obj_t *hint = lv_label_create(price_glass_card);
-        lv_label_set_text(hint, "Tap price to change currency");
-        lv_obj_set_style_text_color(hint, COLOR_TEXT_SECONDARY, 0);
-        lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
-        lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 14);
-        lv_obj_clear_flag(hint, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     }
 
     price_value_cont = lv_obj_create(parent);
@@ -327,16 +319,6 @@ void price_screen_create(void)
     lv_obj_set_style_text_color(price_value_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_letter_space(price_value_label, 2, 0);
     price_apply_value_label();
-
-    price_suffix_label = lv_label_create(price_value_cont);
-    /* The suffix is in a font with an alphabet, so it carries the currency
-     * for anything other than USD. That also covers GBP, EUR and JPY, whose
-     * symbols the big face cannot draw at all. */
-    lv_label_set_text(price_suffix_label,
-                      chain_get_ccy() == CHAIN_CCY_USD ? "" : chain_ccy_code(chain_get_ccy()));
-    lv_obj_set_style_text_color(price_suffix_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_opa(price_suffix_label, (lv_opa_t)192, 0);
-    lv_obj_set_style_text_font(price_suffix_label, &lv_font_montserrat_48, 0);
 
     price_build_cagr_cards(parent, glass);
 
@@ -533,7 +515,6 @@ void price_screen_destroy(void)
         price_value_cont = NULL;
         price_prefix_label = NULL;
         price_value_label = NULL;
-        price_suffix_label = NULL;
         price_title_label = NULL;
         price_status_label = NULL;
         price_glass_card = NULL;
