@@ -254,10 +254,10 @@ void price_screen_create(void)
     }
 
     price_title_label = lv_label_create(price_screen);
-    lv_label_set_text(price_title_label, "Bitcoin Exchange Rate");
+    lv_label_set_text(price_title_label, "Exchange Rate");
     lv_obj_set_style_text_color(price_title_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(price_title_label, &lv_font_montserrat_24, 0);
-    lv_obj_align(price_title_label, LV_ALIGN_TOP_MID, 0, 14);
+    lv_obj_align(price_title_label, LV_ALIGN_TOP_MID, 0, 10);
     if (glass) glass_pill_label(price_title_label, false);
 
     price_status_label = lv_label_create(price_screen);
@@ -286,7 +286,20 @@ void price_screen_create(void)
         lv_obj_set_style_pad_all(parent, 0, 0);
         lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     }
-    lv_obj_align(parent, LV_ALIGN_TOP_MID, 0, 76);
+    lv_obj_align(parent, LV_ALIGN_TOP_MID, 0, 90);
+
+    /* Sit the status line midway between the bottom of the title and the top
+     * of the card rather than at a fixed offset, so it stays centred in that
+     * gap whatever the title says and whether or not the pill padding is on. */
+    lv_obj_update_layout(price_screen);
+    {
+        const lv_coord_t title_bottom = lv_obj_get_y(price_title_label) +
+                                        lv_obj_get_height(price_title_label);
+        const lv_coord_t gap = lv_obj_get_y(parent) - title_bottom;
+        const lv_coord_t status_h = lv_obj_get_height(price_status_label);
+        lv_obj_align(price_status_label, LV_ALIGN_TOP_MID, 0,
+                     title_bottom + (gap - status_h) / 2);
+    }
     if (glass)
     {
         price_glass_card = parent;

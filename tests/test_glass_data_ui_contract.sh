@@ -10,8 +10,8 @@ rg -Fq '"DAYS TO HALVING"' "$repo_dir/main/block.c"
 # The currency is set in settings and shown by the prefix, so the price screen
 # says it once, not three times, and the CAGR captions name the period that
 # won rather than the band that was searched.
-rg -Fq 'lv_label_set_text(price_title_label, "Bitcoin Exchange Rate")' "$repo_dir/main/price.c"
-! rg -q 'Bitcoin Exchange Rate \(' "$repo_dir/main/price.c"
+rg -Fq 'lv_label_set_text(price_title_label, "Exchange Rate")' "$repo_dir/main/price.c"
+! rg -q 'Bitcoin Exchange Rate' "$repo_dir/main/price.c"
 ! rg -q 'BEST 4-6 YEAR CAGR|BEST 7-10 YEAR CAGR' "$repo_dir/main/price.c"
 ! rg -q 'Tap price to change currency' "$repo_dir/main/price.c"
 ! rg -q 'price_suffix_label' "$repo_dir/main/price.c"
