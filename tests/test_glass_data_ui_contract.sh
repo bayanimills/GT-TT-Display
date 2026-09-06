@@ -31,6 +31,14 @@ rg -Fq '"MINER HASHRATE  -  TAP"' "$repo_dir/main/clock.c"
 ! rg -q 'clock_title_label, "CLOCK"' "$repo_dir/main/clock.c"
 rg -Fq 'clock_build_fixed_time' "$repo_dir/main/clock.c"
 
+# Aux is one menu entry over two views, and both weather sources are key-free.
+rg -Fq '{ "Aux",     "Feed + weather"' "$repo_dir/main/settings.c"
+! rg -q '\{ "Feed",    "Recent updates"' "$repo_dir/main/settings.c"
+rg -Fq 'AUX_VIEW_WEATHER' "$repo_dir/main/feed.c"
+rg -Fq 'locationforecast/2.0/complete' "$repo_dir/main/weather.c"
+! rg -q 'locationforecast/2.0/compact' "$repo_dir/main/weather.c"
+rg -Fq 'geocoding-api.open-meteo.com' "$repo_dir/main/weather.c"
+
 # Theme is fixed-height, wallpaper-first, immediately selectable and paged.
 rg -Fq '{ "Theme",   "Wallpaper + accent"' "$repo_dir/main/settings.c"
 rg -Fq 'lv_label_set_text(wall_title, "Wallpaper")' "$repo_dir/main/settings.c"

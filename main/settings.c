@@ -1224,7 +1224,8 @@ static void glass_settings_build_hub(void)
         { "Clock",   "Time display",   true,  GLASS_SCREEN_CLOCK },
         { "Price",   "Exchange rate",  true,  GLASS_SCREEN_PRICE },
         { "Odds",    "Solo mining",    true,  GLASS_SCREEN_ODDS },
-        { "Feed",    "Recent updates", true,  GLASS_SCREEN_FEED },
+        /* One entry, two views behind it: the activity feed and the weather. */
+        { "Aux",     "Feed + weather", true,  GLASS_SCREEN_FEED },
         { "Wi-Fi",   "Network setup",  true,  GLASS_SCREEN_WIFI },
         { "Theme",   "Wallpaper + accent", false, GLASS_SETTINGS_STYLE },
         { "Pool",    "AxeOS + latency",false, GLASS_SETTINGS_POOL },

@@ -740,6 +740,16 @@ bool feed_web_get_config_url(char *out, size_t out_size)
     return true;
 }
 
+void feed_web_get_rss_url(char *out, size_t out_size)
+{
+    if (!out || out_size == 0) return;
+    out[0] = 0;
+    if (!s_initialized) return;
+    char url[FEED_WEB_URL_MAX + 1];
+    config_snapshot(url, NULL);
+    snprintf(out, out_size, "%s", url);
+}
+
 #else
 
 /* The host simulator exercises parsing and URL validation but deliberately
@@ -750,6 +760,11 @@ bool feed_web_get_config_url(char *out, size_t out_size)
 {
     if (out && out_size) out[0] = 0;
     return false;
+}
+
+void feed_web_get_rss_url(char *out, size_t out_size)
+{
+    if (out && out_size) out[0] = 0;
 }
 
 #endif

@@ -17,6 +17,10 @@ bool feed_web_init(void);
  * the display's own address, not wifi_get_current_ip() (the AxeOS/miner IP). */
 bool feed_web_get_config_url(char *out, size_t out_size);
 
+/* The RSS/Atom URL currently in force, so the settings sheet can show what is
+ * configured rather than only how to change it. Empty when none is saved. */
+void feed_web_get_rss_url(char *out, size_t out_size);
+
 /* Pure, bounded helpers kept public so the host build can test the security
  * boundary and RSS/Atom parsing even though its HTTP server is compiled out. */
 bool feed_web_validate_rss_url(const char *url);
