@@ -155,6 +155,7 @@ static void glass_settings_brightness_step(lv_event_t *e);
 static void glass_settings_dim_step(lv_event_t *e);
 static void settings_restore_disclosure_clicked(lv_event_t *e);
 static void settings_perf_info_clicked(lv_event_t *e);
+static void settings_pool_detail_clicked(lv_event_t *e);
 static void glass_settings_fan_step(lv_event_t *e);
 static void settings_sync_glass_fan_controls(void);
 
@@ -1381,6 +1382,93 @@ static void glass_settings_pool_refresh_cb(lv_timer_t *timer)
     }
 }
 
+/* The latency list has room for a name and a figure, which is the right
+ * amount for scanning but not enough to act on: the host and port are what a
+ * person actually needs to type into AxeOS. They get a sheet of their own. */
+static lv_obj_t *pool_detail_overlay = NULL;
+
+static void settings_pool_detail_close(lv_event_t *e)
+{
+    (void)e;
+    if (pool_detail_overlay) {
+        lv_obj_del(pool_detail_overlay);
+        pool_detail_overlay = NULL;
+        display_control_pop_overlay();
+    }
+}
+
+static void settings_pool_detail_clicked(lv_event_t *e)
+{
+    (void)e;
+    if (pool_detail_overlay) return;
+
+    display_control_push_overlay();
+    pool_detail_overlay = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(pool_detail_overlay, SCREEN_WIDTH, SCREEN_HEIGHT);
+    lv_obj_set_pos(pool_detail_overlay, 0, 0);
+    /* Opaque, not a scrim. At 80% the latency list underneath showed through
+     * its own expansion, so every row was printed twice at different sizes. */
+    lv_obj_set_style_bg_color(pool_detail_overlay, COLOR_BACKGROUND, 0);
+    lv_obj_set_style_bg_opa(pool_detail_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(pool_detail_overlay, 0, 0);
+    lv_obj_set_style_pad_all(pool_detail_overlay, 0, 0);
+    lv_obj_clear_flag(pool_detail_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *back = create_settings_button(pool_detail_overlay, LV_SYMBOL_LEFT "  BACK",
+                                            settings_pool_detail_close, false);
+    lv_obj_set_size(back, 150, 50);
+    lv_obj_set_pos(back, 20, 16);
+
+    lv_obj_t *heading = lv_label_create(pool_detail_overlay);
+    lv_label_set_text(heading, "STRATUM ENDPOINTS");
+    lv_obj_set_style_text_color(heading, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(heading, &lv_font_montserrat_24, 0);
+    lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 26);
+
+    /* Same order as the list behind it, so the sheet is the row expanded
+     * rather than a second, differently sorted list of the same six things. */
+    const int n = poolping_count();
+    for (int rank = 0; rank < n && rank < 6; rank++) {
+        const int idx = poolping_ranked(rank);
+        const pool_entry_t *entry = poolping_entry(idx);
+        if (!entry) continue;
+
+        lv_obj_t *row = lv_obj_create(pool_detail_overlay);
+        lv_obj_set_size(row, 712, 58);
+        lv_obj_set_pos(row, 44, 82 + rank * 64);
+        lv_obj_set_style_bg_color(row, COLOR_CARD_BG, 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(row, 1, 0);
+        lv_obj_set_style_border_color(row, COLOR_BORDER, 0);
+        lv_obj_set_style_border_opa(row, LV_OPA_50, 0);
+        lv_obj_set_style_radius(row, 12, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+        lv_obj_t *name = lv_label_create(row);
+        lv_label_set_text(name, entry->label);
+        lv_obj_set_style_text_color(name, COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_font(name, &lv_font_montserrat_18, 0);
+        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 16, 6);
+
+        lv_obj_t *host = lv_label_create(row);
+        lv_label_set_text_fmt(host, "stratum+tcp://%s:%u", entry->host,
+                              (unsigned)entry->port);
+        lv_obj_set_style_text_color(host, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(host, &lv_font_montserrat_16, 0);
+        lv_obj_align(host, LV_ALIGN_BOTTOM_LEFT, 16, -6);
+
+        lv_obj_t *ms = lv_label_create(row);
+        const int lat = poolping_latency_ms(idx);
+        if (lat == POOLPING_PENDING)      lv_label_set_text(ms, "...");
+        else if (lat == POOLPING_FAILED)  lv_label_set_text(ms, "NO REPLY");
+        else                              lv_label_set_text_fmt(ms, "%d ms", lat);
+        lv_obj_set_style_text_color(ms, COLOR_ACCENT, 0);
+        lv_obj_set_style_text_font(ms, &lv_font_montserrat_20, 0);
+        lv_obj_align(ms, LV_ALIGN_RIGHT_MID, -16, 0);
+    }
+}
+
 static void glass_settings_build_pool(void)
 {
     glass_settings_header("POOL");
@@ -1447,8 +1535,10 @@ static void glass_settings_build_pool(void)
     lv_obj_set_pos(privacy, 16, 268);
 
     lv_obj_t *latency = glass_settings_card(glass_settings_body, 356, 68, 378, 318);
+    lv_obj_add_flag(latency, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(latency, settings_pool_detail_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lat_title = lv_label_create(latency);
-    lv_label_set_text(lat_title, "POOL LATENCY");
+    lv_label_set_text(lat_title, "POOL LATENCY  -  TAP FOR STRATUM");
     lv_obj_set_style_text_color(lat_title, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(lat_title, &lv_font_montserrat_14, 0);
     lv_obj_set_pos(lat_title, 16, 14);
