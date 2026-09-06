@@ -32,6 +32,11 @@ rg -Fq '"MINER HASHRATE"' "$repo_dir/main/clock.c"
 ! rg -q 'TAP' "$repo_dir/main/clock.c"
 rg -Fq 'clock_stat_zone(card, slot, false)' "$repo_dir/main/clock.c"
 rg -Fq 'clock_stat_zone(card, slot, true)' "$repo_dir/main/clock.c"
+# The date titles the screen and the weekday sits with the face; the timezone
+# is reachable on the skin the device actually runs.
+rg -Fq 'current_datetitle_text' "$repo_dir/main/clock.c"
+rg -Fq 'current_weekday_text' "$repo_dir/main/clock.c"
+rg -Fq 'settings_timezone_option_list()' "$repo_dir/main/clock.c"
 # No page caption, and the date belongs under the time rather than in the chrome.
 ! rg -q 'clock_title_label, "CLOCK"' "$repo_dir/main/clock.c"
 rg -Fq 'clock_build_fixed_time' "$repo_dir/main/clock.c"

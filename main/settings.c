@@ -89,7 +89,10 @@ static settings_info_t current_settings = {
     .fan_speed_percent = 50,
     .brightness_percent = 100};
 
-static int current_timezone_index = 0;
+/* Australia/Sydney. The panel takes its time from SNTP and its offset from
+ * here, and until the Glass settings gained a control for it there was no way
+ * to change this on the skin the device actually runs. */
+static int current_timezone_index = 8;
 static bool settings_initialized = false;
 
 static const char *timezone_options =
@@ -2970,6 +2973,26 @@ void settings_brightness_slider_changed(lv_event_t *e)
     display_control_set_brightness((uint8_t)current_settings.brightness_percent);
 
     printf("Screen brightness set to: %d%%\n", current_settings.brightness_percent);
+}
+
+const char *settings_timezone_option_list(void)
+{
+    return timezone_options;
+}
+
+int settings_timezone_index(void)
+{
+    settings_load_timezone();
+    return current_timezone_index;
+}
+
+void settings_timezone_select(int index)
+{
+    const size_t count = sizeof(timezone_values) / sizeof(timezone_values[0]);
+    if (index < 0 || (size_t) index >= count || index == current_timezone_index) return;
+    current_timezone_index = index;
+    apply_timezone_by_index(index);
+    settings_save_timezone(index);
 }
 
 void settings_timezone_changed(lv_event_t *e)

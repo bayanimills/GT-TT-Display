@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 #include "nvs.h"
 #include "lwip/apps/sntp.h"
+#include "settings.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +46,7 @@ static lv_obj_t *clock_time_cont = NULL;
 static lv_obj_t *clock_time_label = NULL;
 static lv_obj_t *clock_ampm_label = NULL;
 static lv_obj_t *clock_title_label = NULL;
+static lv_obj_t *clock_tz_dropdown = NULL;
 static lv_obj_t *clock_date_label = NULL;
 static lv_timer_t *clock_timer = NULL;
 
@@ -77,6 +79,11 @@ static int clock_face_size = 0;
 static char current_time_text[16] = "--:--";
 static char current_ampm_text[4] = "--";
 static char current_date_text[32] = "SYNCING TIME";
+/* "06 September 2026" for the title and "Sunday" for under the face. One
+ * strftime each rather than slicing the combined string, because the combined
+ * form is what neither of them wants. */
+static char current_datetitle_text[32] = "SYNCING TIME";
+static char current_weekday_text[16] = "";
 
 static lv_obj_t *create_bottom_nav_btn(lv_obj_t *parent, const char *symbol, lv_event_cb_t event_cb, bool active);
 static lv_obj_t *create_bottom_nav_btn_img(lv_obj_t *parent, const lv_img_dsc_t *img_dsc, lv_event_cb_t event_cb, bool active);
@@ -119,9 +126,17 @@ void clock_screen_create(void)
     {
         clock_prefs_load();
 
-        /* No title and no date up here. A screen showing a clock does not
-         * need to be captioned "CLOCK", and the date belongs with the time it
-         * qualifies, which each layout now places directly beneath it. */
+        /* The title is the date. A screen showing a clock does not need to be
+         * captioned "CLOCK", but it does need to say which day it is, and the
+         * top of the screen is where a title goes. */
+        clock_title_label = lv_label_create(clock_screen);
+        lv_label_set_text(clock_title_label, current_datetitle_text);
+        lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_24, 0);
+        lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 22);
+        lv_obj_clear_flag(clock_title_label, LV_OBJ_FLAG_CLICKABLE);
+        glass_pill_label(clock_title_label, false);
+
         clock_build_glass_display();
         clock_build_glass_settings();
         clock_start_sntp();
@@ -131,6 +146,13 @@ void clock_screen_create(void)
         glass_screen_ready(clock_screen);
         return;
     }
+
+    clock_title_label = lv_label_create(clock_screen);
+    lv_label_set_text(clock_title_label, current_datetitle_text);
+    lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_24, 0);
+    lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 22);
+    if (glass) glass_pill_label(clock_title_label, false);
 
     lv_obj_t *parent;
     if (glass)
@@ -270,11 +292,15 @@ static void clock_update_time_text(void)
         time_info.tm_min = (uptime_sec / 60) % 60;
         time_info.tm_sec = uptime_sec % 60;
         lv_snprintf(current_date_text, sizeof(current_date_text), "SYNCING TIME");
+        lv_snprintf(current_datetitle_text, sizeof(current_datetitle_text), "SYNCING TIME");
+        current_weekday_text[0] = 0;
     }
     else
     {
         localtime_r(&now, &time_info);
         strftime(current_date_text, sizeof(current_date_text), "%A, %d %B %Y", &time_info);
+        strftime(current_datetitle_text, sizeof(current_datetitle_text), "%d %B %Y", &time_info);
+        strftime(current_weekday_text, sizeof(current_weekday_text), "%A", &time_info);
     }
 
     if (clock_glass_mode && clock_use_24h)
@@ -314,7 +340,11 @@ static void clock_update_time_text(void)
     }
     if (clock_date_label)
     {
-        lv_label_set_text(clock_date_label, current_date_text);
+        lv_label_set_text(clock_date_label, current_weekday_text);
+    }
+    if (clock_title_label)
+    {
+        lv_label_set_text(clock_title_label, current_datetitle_text);
     }
     if (clock_glass_mode)
     {
@@ -419,6 +449,13 @@ static void clock_layout_choice_cb(lv_event_t *e)
     clock_refresh_choices();
 }
 
+static void clock_tz_changed_cb(lv_event_t *e)
+{
+    settings_timezone_select((int) lv_dropdown_get_selected(lv_event_get_target(e)));
+    /* The offset moved, so every string on this screen is now stale. */
+    clock_update_time_text();
+}
+
 static void clock_open_settings_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
@@ -426,6 +463,7 @@ static void clock_open_settings_cb(lv_event_t *e)
     /* The date rides inside the display card now, so hiding the card hides
      * it too; there is nothing left up here to hide separately. */
     lv_obj_add_flag(clock_display_card, LV_OBJ_FLAG_HIDDEN);
+    if (clock_title_label) lv_obj_add_flag(clock_title_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(clock_settings_card, LV_OBJ_FLAG_HIDDEN);
     clock_refresh_choices();
     /* The grabber predates this pane in z-order. A full invalidation keeps its
@@ -438,6 +476,7 @@ static void clock_close_settings_cb(lv_event_t *e)
     LV_UNUSED(e);
     if (!clock_settings_card || !clock_screen) return;
     lv_obj_add_flag(clock_settings_card, LV_OBJ_FLAG_HIDDEN);
+    if (clock_title_label) lv_obj_clear_flag(clock_title_label, LV_OBJ_FLAG_HIDDEN);
     clock_build_glass_display();
     lv_obj_clear_flag(clock_display_card, LV_OBJ_FLAG_HIDDEN);
     clock_update_time_text();
@@ -465,8 +504,8 @@ static lv_obj_t *clock_choice_button(lv_obj_t *parent, const char *text, int x, 
 
 static void clock_build_glass_settings(void)
 {
-    clock_settings_card = glass_pane(clock_screen, 744, 356, 28);
-    lv_obj_align(clock_settings_card, LV_ALIGN_TOP_MID, 0, 48);
+    clock_settings_card = glass_pane(clock_screen, 744, 372, 28);
+    lv_obj_align(clock_settings_card, LV_ALIGN_TOP_MID, 0, 40);
     lv_obj_clear_flag(clock_settings_card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(clock_settings_card, LV_SCROLLBAR_MODE_OFF);
 
@@ -510,16 +549,25 @@ static void clock_build_glass_settings(void)
 
     lv_obj_t *layout_caption = clock_text_label(clock_settings_card, "CLOCK LAYOUT",
                                                  &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
-    lv_obj_set_pos(layout_caption, 38, 247);
-    clock_layout_buttons[0] = clock_choice_button(clock_settings_card, "SINGLE", 292, 224,
+    lv_obj_set_pos(layout_caption, 38, 235);
+    clock_layout_buttons[0] = clock_choice_button(clock_settings_card, "SINGLE", 292, 212,
                                                    clock_layout_choice_cb, 0);
-    clock_layout_buttons[1] = clock_choice_button(clock_settings_card, "TWIN", 488, 224,
+    clock_layout_buttons[1] = clock_choice_button(clock_settings_card, "TWIN", 488, 212,
                                                    clock_layout_choice_cb, 1);
 
-    lv_obj_t *hint = clock_text_label(clock_settings_card,
-                                      "In Twin view, tap either right card to rotate its metric.",
-                                      &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);
+    /* The panel gets the time from SNTP and the offset from here. This is the
+     * only control for it on the Glass skin: the classic settings page has one
+     * too, and Glass never builds that page. */
+    lv_obj_t *tz_caption = clock_text_label(clock_settings_card, "TIME ZONE",
+                                            &lv_font_montserrat_14, COLOR_TEXT_SECONDARY);
+    lv_obj_set_pos(tz_caption, 38, 305);
+    clock_tz_dropdown = lv_dropdown_create(clock_settings_card);
+    lv_obj_set_size(clock_tz_dropdown, 380, 50);
+    lv_obj_set_pos(clock_tz_dropdown, 292, 288);
+    lv_dropdown_set_options(clock_tz_dropdown, settings_timezone_option_list());
+    lv_dropdown_set_selected(clock_tz_dropdown, (uint16_t) settings_timezone_index());
+    glass_style_dropdown(clock_tz_dropdown);
+    lv_obj_add_event_cb(clock_tz_dropdown, clock_tz_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     clock_refresh_choices();
     lv_obj_add_flag(clock_settings_card, LV_OBJ_FLAG_HIDDEN);
@@ -704,38 +752,19 @@ static void clock_build_face(lv_obj_t *parent, int x, int y, int size)
     lv_obj_set_style_pad_all(hub, 0, 0);
     lv_obj_clear_flag(hub, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    /* No digital inset on the dial. A readout floating over the hands is the
-     * one thing an analogue face is for not needing, and it fought the second
-     * hand for the same pixels. The time and date go under the dial instead,
-     * on the parent, so they are not clipped by it. */
-    lv_obj_t *below = parent;
+    /* Nothing on the dial and no digital readout under it. A clock face that
+     * has to be accompanied by the time in figures is not doing its job. What
+     * the hands genuinely cannot say is which day it is, so that is what goes
+     * underneath; the date itself titles the screen. */
     const int face_bottom = y + size;
     const bool twin = clock_twin_layout;
 
-    clock_time_cont = lv_obj_create(below);
-    lv_obj_set_size(clock_time_cont, size + 80, twin ? 30 : 58);
-    lv_obj_set_pos(clock_time_cont, x - 40, face_bottom + (twin ? 2 : 6));
-    lv_obj_set_style_bg_opa(clock_time_cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(clock_time_cont, 0, 0);
-    lv_obj_set_style_pad_all(clock_time_cont, 0, 0);
-    lv_obj_clear_flag(clock_time_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-
-    clock_time_label = clock_text_label(clock_time_cont, current_time_text,
-                                        twin ? &lv_font_montserrat_24 : &lv_font_montserrat_48,
+    clock_date_label = clock_text_label(parent, current_weekday_text,
+                                        twin ? &lv_font_montserrat_20 : &lv_font_montserrat_28,
                                         COLOR_TEXT_PRIMARY);
-    lv_obj_align(clock_time_label, LV_ALIGN_CENTER, clock_use_24h ? 0 : -16, 0);
-    clock_ampm_label = clock_text_label(clock_time_cont, current_ampm_text,
-                                        twin ? &lv_font_montserrat_12 : &lv_font_montserrat_20,
-                                        COLOR_TEXT_SECONDARY);
-    lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, twin ? 8 : 16, twin ? 4 : 10);
-
-    clock_date_label = clock_text_label(below, current_date_text,
-                                        twin ? &lv_font_montserrat_12 : &lv_font_montserrat_20,
-                                        COLOR_TEXT_SECONDARY);
     lv_obj_set_width(clock_date_label, size + 120);
     lv_obj_set_style_text_align(clock_date_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(clock_date_label, x - 60,
-                   face_bottom + (twin ? 34 : 68));
+    lv_obj_set_pos(clock_date_label, x - 60, face_bottom + (twin ? 8 : 16));
 }
 
 /* Montserrat's figures are proportional, and at 140px the spread is extreme:
@@ -818,9 +847,9 @@ static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
                                         &lv_font_montserrat_24, COLOR_TEXT_SECONDARY);
     lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, -24, big ? -6 : 18);
 
-    /* The date sits under the time it qualifies rather than at the top of the
-     * screen two elements away from it. */
-    clock_date_label = clock_text_label(clock_time_cont, current_date_text,
+    /* The weekday, to match the analogue face. The numeric date is the title
+     * and does not need saying twice. */
+    clock_date_label = clock_text_label(clock_time_cont, current_weekday_text,
                                         big ? &lv_font_montserrat_24 : &lv_font_montserrat_14,
                                         COLOR_TEXT_SECONDARY);
     lv_obj_set_width(clock_date_label, w - 24);
@@ -874,8 +903,8 @@ static void clock_build_glass_display(void)
             clock_build_digital(clock_display_content, 34, 35, 298, 252,
                                 &lv_font_montserrat_48);
         else
-            /* The dial gives up 32px so the time and date can sit under it
-             * instead of on top of the hands. */
+            /* One line under the dial now, not two, so it keeps more of its
+             * diameter: 22 + 230 + 8 + 24 against 322. */
             clock_build_face(clock_display_content, 75, 22, 230);
         clock_stat_card(clock_display_content, 0, 34);
         clock_stat_card(clock_display_content, 1, 168);
@@ -886,9 +915,9 @@ static void clock_build_glass_display(void)
             clock_build_digital(clock_display_content, 52, 18, 640, 286,
                                 &montserrat_140);
         else
-            /* 208px leaves exactly enough under the dial for a 48px time and
-             * a 20px date inside the 322px card: 8 + 208 + 6 + 57 + 4 + 24. */
-            clock_build_face(clock_display_content, 268, 8, 208);
+            /* With only the weekday underneath, the dial takes back the room
+             * the time used to need: 10 + 240 + 16 + 34 against 322. */
+            clock_build_face(clock_display_content, 252, 10, 240);
     }
 }
 

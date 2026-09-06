@@ -30,6 +30,13 @@ void settings_fan_slider_changed(lv_event_t * e);
 void settings_fan_save_clicked(lv_event_t * e);
 void settings_brightness_slider_changed(lv_event_t * e);
 void settings_timezone_changed(lv_event_t * e);
+
+/* The timezone lived only on the classic settings page, which the Glass skin
+ * never builds, so on the skin the device actually runs it could not be
+ * changed at all. These let the clock's own settings sheet own it. */
+const char *settings_timezone_option_list(void);
+int settings_timezone_index(void);
+void settings_timezone_select(int index);
 void settings_theme_changed(lv_event_t * e);
 
 /* Rebuild the settings screen so a new theme's colours take effect.
