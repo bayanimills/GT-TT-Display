@@ -20,18 +20,68 @@ static const char *TAG = "sim_shim";
 
 static ota_info_t s_ota;
 
+/* The settings page is a three-gate state machine now - check, download,
+ * update - and the whole point of the gates is that each one only offers
+ * itself once the one before it has happened. Modelling that here is what
+ * lets the sim show the button saying the wrong thing. `sim_ota_scenario`
+ * chooses whether the check finds anything. */
+static bool s_ota_update_exists = true;
+
+void sim_ota_set_scenario(bool update_exists)
+{
+    s_ota_update_exists = update_exists;
+    s_ota.status = OTA_STATUS_IDLE;
+    s_ota.progress_percent = 0;
+}
+
+void sim_ota_set_progress(int percent)
+{
+    s_ota.status = OTA_STATUS_DOWNLOADING;
+    s_ota.progress_percent = percent;
+}
+
 void ota_check_for_updates(void)
 {
-    ESP_LOGI(TAG, "ota check (no-op in sim)");
+    if (s_ota_update_exists) {
+        s_ota.status = OTA_STATUS_UPDATE_AVAILABLE;
+        snprintf(s_ota.latest_version, sizeof(s_ota.latest_version), "v9.9.9");
+    } else {
+        s_ota.status = OTA_STATUS_NO_UPDATE;
+    }
+    s_ota.progress_percent = 0;
+    ESP_LOGI(TAG, "ota check (sim): %s",
+             s_ota_update_exists ? "update available" : "up to date");
 }
 void ota_check_original_release(void)
 {
     s_ota.restore_status = OTA_RESTORE_READY;
     snprintf(s_ota.original_version, sizeof(s_ota.original_version), "v1.1.2");
-    ESP_LOGI(TAG, "ota: official release ready (sim)");
+    ESP_LOGI(TAG, "ota: default release ready (sim)");
 }
-esp_err_t ota_update_start_latest(void) { return ESP_FAIL; }
-esp_err_t ota_restore_original_latest(void) { return ESP_FAIL; }
+esp_err_t ota_update_start_latest(void)
+{
+    if (s_ota.status != OTA_STATUS_UPDATE_AVAILABLE) return ESP_ERR_INVALID_STATE;
+    s_ota.status = OTA_STATUS_DOWNLOADED;
+    s_ota.progress_percent = 100;
+    ESP_LOGI(TAG, "ota: downloaded, waiting to install (sim)");
+    return ESP_OK;
+}
+esp_err_t ota_update_install_downloaded(void)
+{
+    if (s_ota.status != OTA_STATUS_DOWNLOADED) return ESP_ERR_INVALID_STATE;
+    s_ota.status = OTA_STATUS_SUCCESS;
+    s_ota.progress_percent = 100;
+    ESP_LOGI(TAG, "ota: installing (sim, no restart)");
+    return ESP_OK;
+}
+bool ota_update_has_download(void) { return s_ota.status == OTA_STATUS_DOWNLOADED; }
+esp_err_t ota_restore_original_latest(void)
+{
+    if (s_ota.restore_status != OTA_RESTORE_READY) return ESP_ERR_INVALID_STATE;
+    s_ota.status = OTA_STATUS_DOWNLOADED;
+    s_ota.progress_percent = 100;
+    return ESP_OK;
+}
 esp_err_t ota_update_start(const char *url) { (void) url; return ESP_FAIL; }
 void ota_update_get_info(ota_info_t *info)
 {

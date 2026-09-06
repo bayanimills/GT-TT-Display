@@ -18,6 +18,10 @@ static lv_obj_t *progress_label = NULL;
 static lv_obj_t *progress_bar = NULL;
 static lv_obj_t *return_screen = NULL;
 static int last_reported_progress = -1;
+static bool s_installing = false;
+static lv_obj_t *warning_label = NULL;
+static lv_obj_t *warning2_label = NULL;
+static void ota_screen_apply_phase_text(void);
 static bool overlay_pushed = false;
 
 void ota_screen_show(void)
@@ -31,6 +35,11 @@ void ota_screen_show(void)
         if (lv_scr_act() == ota_screen && return_screen) lv_scr_load(return_screen);
         lv_obj_del(ota_screen);
         ota_screen = NULL;
+        status_label = NULL;
+        progress_label = NULL;
+        progress_bar = NULL;
+        warning_label = NULL;
+        warning2_label = NULL;
     }
     if (!overlay_pushed) {
         display_control_push_overlay();
@@ -75,23 +84,46 @@ void ota_screen_show(void)
     /* Flash writes can briefly stall the PSRAM-backed panel. The updater keeps
      * the backlight on and pauses LVGL between writes, so describe the visible
      * pause/flicker rather than incorrectly promising a dark screen. */
-    lv_obj_t *warning = lv_label_create(ota_screen);
-    lv_label_set_text(warning, "The screen may pause or flicker while flash is written.");
-    lv_obj_set_style_text_color(warning, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(warning, &lv_font_montserrat_20, 0);
-    lv_obj_align(warning, LV_ALIGN_BOTTOM_MID, 0, -66);
+    warning_label = lv_label_create(ota_screen);
+    lv_obj_set_style_text_color(warning_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(warning_label, &lv_font_montserrat_20, 0);
+    lv_obj_align(warning_label, LV_ALIGN_BOTTOM_MID, 0, -66);
 
-    lv_obj_t *warning2 = lv_label_create(ota_screen);
-    lv_label_set_text(warning2, "Keep power connected. It will restart automatically.");
-    lv_obj_set_style_text_color(warning2, lv_color_hex(0xFF6B6B), 0);
-    lv_obj_set_style_text_font(warning2, &lv_font_montserrat_20, 0);
-    lv_obj_align(warning2, LV_ALIGN_BOTTOM_MID, 0, -36);
+    warning2_label = lv_label_create(ota_screen);
+    lv_obj_set_style_text_font(warning2_label, &lv_font_montserrat_20, 0);
+    lv_obj_align(warning2_label, LV_ALIGN_BOTTOM_MID, 0, -36);
+    ota_screen_apply_phase_text();
 
     // Load the screen
     lv_scr_load(ota_screen);
 
     last_reported_progress = -1;
     ESP_LOGI(TAG, "OTA screen loaded and displayed");
+}
+
+/* The two lines at the foot of the overlay say different things depending on
+ * which half is running, so they are set from one place. */
+static void ota_screen_apply_phase_text(void)
+{
+    if (!warning_label || !warning2_label) return;
+    if (s_installing) {
+        lv_label_set_text(warning_label, "The screen may pause or go dark for a moment.");
+        lv_label_set_text(warning2_label, "Do not remove power. It will restart automatically.");
+        lv_obj_set_style_text_color(warning2_label, lv_color_hex(0xFF6B6B), 0);
+    } else {
+        lv_label_set_text(warning_label, "The screen may pause or flicker while flash is written.");
+        lv_label_set_text(warning2_label, "Safe to stop: nothing changes until you install.");
+        lv_obj_set_style_text_color(warning2_label, lv_color_hex(0xCCCCCC), 0);
+    }
+}
+
+void ota_screen_set_phase(bool installing)
+{
+    s_installing = installing;
+    ota_screen_apply_phase_text();
+    /* The next progress report should repaint the caption even if the figure
+     * has not moved, so forget what was last shown. */
+    last_reported_progress = -1;
 }
 
 void ota_screen_update_progress(int progress)
@@ -111,14 +143,17 @@ void ota_screen_update_progress(int progress)
     lv_bar_set_value(progress_bar, progress, LV_ANIM_OFF);
 
     if (progress >= 100) {
-        lv_label_set_text(status_label, "Complete! Rebooting...");
-        ESP_LOGI(TAG, "OTA complete, rebooting...");
+        lv_label_set_text(status_label, s_installing ? "Complete! Rebooting..."
+                                                     : "Downloaded");
+        ESP_LOGI(TAG, "OTA phase complete");
     } else if (progress >= 1) {
-        lv_label_set_text(status_label, "Installing firmware...");
+        lv_label_set_text(status_label, s_installing ? "Installing firmware..."
+                                                     : "Downloading firmware...");
         ESP_LOGI(TAG, "OTA progress: %d%%", progress);
     } else {
         // Initial state
-        lv_label_set_text(status_label, "Starting update...");
+        lv_label_set_text(status_label, s_installing ? "Starting install..."
+                                                     : "Starting download...");
         lv_label_set_text(progress_label, "0%");
         ESP_LOGI(TAG, "OTA starting...");
     }
@@ -157,6 +192,8 @@ void ota_screen_hide(void)
         status_label = NULL;
         progress_label = NULL;
         progress_bar = NULL;
+        warning_label = NULL;
+        warning2_label = NULL;
         last_reported_progress = -1;
     }
     return_screen = NULL;

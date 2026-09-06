@@ -53,6 +53,9 @@
 #include "feed.h"
 #include "blockfound.h"
 #include "ota_screen.h"
+
+void sim_ota_set_scenario(bool update_exists);
+void sim_ota_set_progress(int percent);
 void sim_ota_fake_available(bool on);
 void sim_ota_fake_original_available(bool on);
 #include "chain.h"
@@ -368,6 +371,11 @@ static void handle_command(char *line)
         else if (strcmp(what, "progress") == 0) ota_screen_update_progress(atoi(value));
         else if (strcmp(what, "error") == 0) ota_screen_show_error(value[0] ? value : "Update failed");
         else if (strcmp(what, "hide") == 0) ota_screen_hide();
+        else if (strcmp(what, "phase") == 0) ota_screen_set_phase(strcmp(value, "install") == 0);
+        /* Drive the settings gates rather than the overlay: "O has 1" makes
+         * the next check find an update, "O has 0" makes it find nothing. */
+        else if (strcmp(what, "has") == 0) sim_ota_set_scenario(atoi(value) != 0);
+        else if (strcmp(what, "downloading") == 0) sim_ota_set_progress(atoi(value));
         s_dirty = true;
         break;
     }

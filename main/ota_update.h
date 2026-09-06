@@ -24,6 +24,10 @@ typedef enum {
     OTA_STATUS_NO_UPDATE,
     OTA_STATUS_DOWNLOADING,
     OTA_STATUS_FLASHING,
+    /* The image is written and verified in the partition the device is not
+     * running from, and nothing has been committed yet. Switching the boot
+     * partition is a separate, explicit step. */
+    OTA_STATUS_DOWNLOADED,
     OTA_STATUS_SUCCESS,
     OTA_STATUS_ERROR
 } ota_status_t;
@@ -54,6 +58,15 @@ typedef struct {
 
 
 void ota_check_for_updates(void);
+
+/* Commit a firmware that ota_update_start_latest() has already downloaded:
+ * point the bootloader at it and restart. Returns ESP_ERR_INVALID_STATE if
+ * nothing has been downloaded in this session. */
+esp_err_t ota_update_install_downloaded(void);
+
+/* True while a verified image is sitting in the inactive partition waiting to
+ * be committed. */
+bool ota_update_has_download(void);
 
 /* Fetch the latest official bitaxeorg display release. This is deliberately a
  * separate action from the fork updater: restoring is normally a downgrade

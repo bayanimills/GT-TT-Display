@@ -154,6 +154,9 @@ static void glass_settings_sync_display_controls(void);
 static void glass_settings_brightness_step(lv_event_t *e);
 static void glass_settings_dim_step(lv_event_t *e);
 static void settings_restore_disclosure_clicked(lv_event_t *e);
+static void settings_perf_info_clicked(lv_event_t *e);
+static void glass_settings_fan_step(lv_event_t *e);
+static void settings_sync_glass_fan_controls(void);
 
 typedef enum {
     GLASS_SETTINGS_HUB = 0,
@@ -164,6 +167,18 @@ typedef enum {
 } glass_settings_page_t;
 
 static glass_settings_page_t glass_settings_page = GLASS_SETTINGS_HUB;
+
+/* "Already up to date" is the one status worth saying in a colour. Bright
+ * enough to pass on the Glass wallpapers as well as the classic black. */
+#define SETTINGS_OK_GREEN 0x4ADE80
+
+/* Both updaters drive one OTA state machine, so only one may own it. Engaging
+ * the default channel locks the fork channel out until the page is rebuilt,
+ * which is what leaving System and coming back does. */
+static bool ota_default_engaged = false;
+
+/* Manual fan controls, hidden while the miner is managing its own fan. */
+static lv_obj_t *glass_fan_manual_cont = NULL;
 static void glass_settings_render(void);
 
 static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
@@ -571,16 +586,22 @@ static void ota_update_timer_cb(lv_timer_t *timer)
     lv_obj_t *btn_label = lv_obj_get_child(ota_update_btn, 0);
     const bool compact_ota = glass_active() && glass_settings_page == GLASS_SETTINGS_SYSTEM;
 
+    /* The bar reports bytes on the flash, so it only moves while something is
+     * actually being written or is sitting there written. An empty bar on
+     * "up to date" is the honest reading: nothing was downloaded. */
+    lv_obj_set_style_text_color(ota_status_label, COLOR_TEXT_SECONDARY, 0);
+
     switch (info.status) {
         case OTA_STATUS_IDLE:
-            lv_label_set_text(ota_status_label, "Ready for update");
-            if (btn_label) lv_label_set_text(btn_label, compact_ota ? "UPDATE" : "CHECK FOR UPDATES");
+            lv_label_set_text(ota_status_label, "Checking for updates...");
+            if (btn_label) lv_label_set_text(btn_label, "CHECK");
             lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
             break;
 
         case OTA_STATUS_CHECKING:
             lv_label_set_text(ota_status_label, "Checking for updates...");
+            if (btn_label) lv_label_set_text(btn_label, "CHECKING");
             lv_obj_add_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
             break;
@@ -593,39 +614,47 @@ static void ota_update_timer_cb(lv_timer_t *timer)
                     info.current_version, info.latest_version);
                 lv_label_set_text(ota_version_label, status_text);
             }
-            if (btn_label) lv_label_set_text(btn_label, compact_ota ? "INSTALL" : "INSTALL UPDATE");
+            if (btn_label) lv_label_set_text(btn_label, "DOWNLOAD");
             lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
             break;
 
         case OTA_STATUS_NO_UPDATE:
             lv_label_set_text(ota_status_label, "Already up to date");
-            if (btn_label) lv_label_set_text(btn_label, compact_ota ? "UPDATE" : "CHECK FOR UPDATES");
+            lv_obj_set_style_text_color(ota_status_label, lv_color_hex(SETTINGS_OK_GREEN), 0);
+            if (btn_label) lv_label_set_text(btn_label, "CHECK");
+            lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
+            lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
+            break;
+
+        case OTA_STATUS_DOWNLOADING:
+        case OTA_STATUS_FLASHING:
+            lv_label_set_text_fmt(ota_status_label, "Downloading... %d%%", info.progress_percent);
+            if (btn_label) lv_label_set_text(btn_label, "DOWNLOADING");
+            lv_obj_add_state(ota_update_btn, LV_STATE_DISABLED);
+            lv_bar_set_value(ota_progress_bar, info.progress_percent, LV_ANIM_ON);
+            break;
+
+        case OTA_STATUS_DOWNLOADED:
+            snprintf(status_text, sizeof(status_text), "%s downloaded - ready to install",
+                     info.latest_version[0] ? info.latest_version : "Firmware");
+            lv_label_set_text(ota_status_label, status_text);
+            if (btn_label) lv_label_set_text(btn_label, "UPDATE");
             lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 100, LV_ANIM_OFF);
             break;
 
-        case OTA_STATUS_DOWNLOADING:
-            lv_label_set_text_fmt(ota_status_label, "Downloading... %d%%", info.progress_percent);
-            lv_obj_add_state(ota_update_btn, LV_STATE_DISABLED);
-            lv_bar_set_value(ota_progress_bar, info.progress_percent, LV_ANIM_ON);
-            break;
-
-        case OTA_STATUS_FLASHING:
-            lv_label_set_text_fmt(ota_status_label, "Installing... %d%%", info.progress_percent);
-            lv_obj_add_state(ota_update_btn, LV_STATE_DISABLED);
-            lv_bar_set_value(ota_progress_bar, info.progress_percent, LV_ANIM_ON);
-            break;
-
         case OTA_STATUS_SUCCESS:
-            lv_label_set_text(ota_status_label, "Update successful! Rebooting...");
+            lv_label_set_text(ota_status_label, "Installing. The display will restart.");
+            if (btn_label) lv_label_set_text(btn_label, "INSTALLING");
+            lv_obj_add_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 100, LV_ANIM_ON);
             break;
 
         case OTA_STATUS_ERROR:
             lv_label_set_text_fmt(ota_status_label, "Error: %s", 
                 info.error_msg[0] ? info.error_msg : "Unknown error");
-            if (btn_label) lv_label_set_text(btn_label, compact_ota ? "UPDATE" : "CHECK FOR UPDATES");
+            if (btn_label) lv_label_set_text(btn_label, "CHECK");
             lv_obj_clear_state(ota_update_btn, LV_STATE_DISABLED);
             lv_bar_set_value(ota_progress_bar, 0, LV_ANIM_OFF);
             break;
@@ -633,36 +662,57 @@ static void ota_update_timer_cb(lv_timer_t *timer)
 
     if (ota_restore_btn && ota_restore_status_label) {
         lv_obj_t *restore_label = lv_obj_get_child(ota_restore_btn, 0);
+        /* Once the default release has been fetched it shares the one OTA
+         * state machine with the fork channel, so it reports the same three
+         * steps: check, download, update. */
+        const bool default_owns_transfer =
+            ota_default_engaged && (info.status == OTA_STATUS_DOWNLOADING ||
+                                    info.status == OTA_STATUS_FLASHING ||
+                                    info.status == OTA_STATUS_DOWNLOADED);
         switch (info.restore_status) {
             case OTA_RESTORE_IDLE:
                 lv_label_set_text(ota_restore_status_label,
-                                  "Official release: check before restoring");
-                if (restore_label) lv_label_set_text(restore_label, compact_ota ? "CHECK OFFICIAL" : "CHECK OFFICIAL RELEASE");
+                                  "Default release: check before installing");
+                if (restore_label) lv_label_set_text(restore_label, compact_ota ? "CHECK DEFAULT" : "CHECK DEFAULT RELEASE");
                 lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
                 break;
             case OTA_RESTORE_CHECKING:
                 lv_label_set_text(ota_restore_status_label,
                                   "Checking bitaxeorg for its latest release...");
-                if (restore_label) lv_label_set_text(restore_label, "CHECKING...");
+                if (restore_label) lv_label_set_text(restore_label, "CHECKING");
                 lv_obj_add_state(ota_restore_btn, LV_STATE_DISABLED);
                 break;
             case OTA_RESTORE_READY:
                 lv_label_set_text_fmt(ota_restore_status_label,
-                                      "Latest official release: %s", info.original_version);
-                if (restore_label) lv_label_set_text(restore_label, compact_ota ? "RESTORE" : "ATTEMPT OFFICIAL RESTORE");
+                                      "Latest default release: %s", info.original_version);
+                if (restore_label) {
+                    lv_label_set_text(restore_label,
+                                      info.status == OTA_STATUS_DOWNLOADED ? "UPDATE" : "DOWNLOAD");
+                }
                 lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
                 break;
             case OTA_RESTORE_ERROR:
-                lv_label_set_text_fmt(ota_restore_status_label, "Official check failed: %s",
+                lv_label_set_text_fmt(ota_restore_status_label, "Default check failed: %s",
                                       info.restore_error_msg[0] ? info.restore_error_msg : "Unknown error");
-                if (restore_label) lv_label_set_text(restore_label, compact_ota ? "TRY AGAIN" : "TRY OFFICIAL CHECK AGAIN");
+                if (restore_label) lv_label_set_text(restore_label, compact_ota ? "TRY AGAIN" : "TRY DEFAULT CHECK AGAIN");
                 lv_obj_clear_state(ota_restore_btn, LV_STATE_DISABLED);
                 break;
         }
+        if (default_owns_transfer && info.status != OTA_STATUS_DOWNLOADED) {
+            lv_obj_add_state(ota_restore_btn, LV_STATE_DISABLED);
+        }
     }
 
-    /* A check or flash from either channel owns the OTA state machine. Disable
-     * both actions so two fingers, the daily poll, and a restore cannot race. */
+    /* Engaging the default channel takes the shared state machine for the rest
+     * of this visit. Leaving System and returning rebuilds the page and clears
+     * it; that is the deliberate way back to the fork channel. */
+    if (ota_default_engaged) {
+        lv_obj_add_state(ota_update_btn, LV_STATE_DISABLED);
+        if (btn_label) lv_label_set_text(btn_label, "LOCKED");
+    }
+
+    /* A check or transfer from either channel owns the OTA state machine.
+     * Disable both actions so two fingers and the daily poll cannot race. */
     if (ota_update_is_running()) {
         lv_obj_add_state(ota_update_btn, LV_STATE_DISABLED);
         if (ota_restore_btn) lv_obj_add_state(ota_restore_btn, LV_STATE_DISABLED);
@@ -675,10 +725,17 @@ static void settings_ota_update_clicked(lv_event_t *e)
     ota_info_t info;
     ota_update_get_info(&info);
 
-    if (info.status == OTA_STATUS_UPDATE_AVAILABLE) {
+    /* Three gates, in order: find out, fetch, commit. The button never offers
+     * a step whose prerequisite has not happened. */
+    if (info.status == OTA_STATUS_DOWNLOADED) {
+        esp_err_t ret = ota_update_install_downloaded();
+        if (ret != ESP_OK && ota_status_label) {
+            lv_label_set_text(ota_status_label, "Failed to start install");
+        }
+    } else if (info.status == OTA_STATUS_UPDATE_AVAILABLE) {
         esp_err_t ret = ota_update_start_latest();
         if (ret != ESP_OK && ota_status_label) {
-            lv_label_set_text(ota_status_label, "Failed to start update");
+            lv_label_set_text(ota_status_label, "Failed to start download");
         }
     } else {
         ota_check_for_updates();
@@ -701,7 +758,7 @@ static void settings_restore_confirmed(lv_event_t *e)
     settings_restore_overlay_close(NULL);
     esp_err_t ret = ota_restore_original_latest();
     if (ret != ESP_OK && ota_restore_status_label) {
-        lv_label_set_text(ota_restore_status_label, "Could not start the official restore");
+        lv_label_set_text(ota_restore_status_label, "Could not start the default download");
     }
 }
 
@@ -738,13 +795,13 @@ static void settings_show_restore_confirmation(const ota_info_t *info)
     lv_obj_add_flag(dialog, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *title = lv_label_create(dialog);
-    lv_label_set_text(title, "ATTEMPT OFFICIAL RESTORE?");
+    lv_label_set_text(title, "DOWNLOAD THE DEFAULT RELEASE?");
     lv_obj_set_style_text_color(title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
     lv_obj_t *target = lv_label_create(dialog);
-    lv_label_set_text_fmt(target, "Current: %s     Official target: %s",
+    lv_label_set_text_fmt(target, "Current: %s     Default target: %s",
                           info->current_version[0] ? info->current_version : "Unknown",
                           info->original_version[0] ? info->original_version : "Unknown");
     lv_obj_set_style_text_color(target, COLOR_ACCENT, 0);
@@ -753,10 +810,10 @@ static void settings_show_restore_confirmation(const ota_info_t *info)
 
     lv_obj_t *warning = lv_label_create(dialog);
     lv_label_set_text(warning,
-        "This attempts to replace the custom interface with the latest bitaxeorg release.\n"
+        "This downloads the latest bitaxeorg release, replacing the custom interface.\n"
         "Display settings are kept, but custom screens and themes are removed.\n\n"
         "Important: if custom firmware was installed by USB, its rollback-enabled\n"
-        "bootloader may undo this OTA restore after a later reboot. Use the official\n"
+        "bootloader may undo this OTA restore after a later reboot. Use the default\n"
         "USB factory image for a guaranteed permanent restore.");
     lv_label_set_long_mode(warning, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(warning, 590);
@@ -768,7 +825,7 @@ static void settings_show_restore_confirmation(const ota_info_t *info)
     lv_obj_t *cancel = create_settings_button(dialog, "CANCEL", settings_restore_overlay_close, false);
     lv_obj_set_size(cancel, 190, 48);
     lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 18, -4);
-    lv_obj_t *restore = create_settings_button(dialog, "TRY RESTORE VIA OTA", settings_restore_confirmed, true);
+    lv_obj_t *restore = create_settings_button(dialog, "DOWNLOAD", settings_restore_confirmed, true);
     lv_obj_set_size(restore, 250, 48);
     lv_obj_align(restore, LV_ALIGN_BOTTOM_RIGHT, -18, -4);
 
@@ -780,7 +837,18 @@ static void settings_original_restore_clicked(lv_event_t *e)
     (void)e;
     ota_info_t info;
     ota_update_get_info(&info);
-    if (info.restore_status == OTA_RESTORE_READY) {
+
+    /* From the first tap the default channel owns the shared state machine.
+     * The fork updater is locked out until the page is rebuilt, so the two
+     * cannot half-finish over each other. */
+    ota_default_engaged = true;
+
+    if (info.status == OTA_STATUS_DOWNLOADED) {
+        esp_err_t ret = ota_update_install_downloaded();
+        if (ret != ESP_OK && ota_restore_status_label) {
+            lv_label_set_text(ota_restore_status_label, "Could not start the install");
+        }
+    } else if (info.restore_status == OTA_RESTORE_READY) {
         settings_show_restore_confirmation(&info);
     } else {
         ota_check_original_release();
@@ -1061,6 +1129,7 @@ static void glass_settings_reset_refs(void)
     performance_low_btn = performance_medium_btn = performance_high_btn = NULL;
     auto_fan_checkbox = fan_section = fan_manual_cont = NULL;
     fan_slider = fan_value_label = fan_save_btn = NULL;
+    glass_fan_manual_cont = NULL;
     brightness_slider = brightness_value_label = NULL;
     timezone_dropdown = data_source_dropdown = currency_dropdown = NULL;
     display_schedule_checkbox = display_schedule_status = NULL;
@@ -1438,6 +1507,125 @@ static void glass_settings_sync_display_controls(void)
     }
 }
 
+/* The three preset names say nothing about what they do to the ASIC, and the
+ * figures come straight from the BAP settings each button sends, so they
+ * cannot drift away from the code below them. */
+static lv_obj_t *perf_info_overlay = NULL;
+
+static void settings_perf_info_close(lv_event_t *e)
+{
+    (void)e;
+    if (perf_info_overlay) {
+        lv_obj_del(perf_info_overlay);
+        perf_info_overlay = NULL;
+        display_control_pop_overlay();
+    }
+}
+
+static void settings_perf_info_clicked(lv_event_t *e)
+{
+    if (perf_info_overlay) return;
+
+    const performance_mode_t mode = (performance_mode_t)(intptr_t)lv_event_get_user_data(e);
+    const char *title;
+    const char *body;
+    switch (mode) {
+        case PERFORMANCE_LOW:
+            title = "Low";
+            body  = "575 MHz core clock at 1160 mV.\n\n"
+                    "The coolest and quietest of the three, and the least\n"
+                    "hashrate. Worth choosing if the miner shares a room\n"
+                    "with you, or if the fan is already running flat out.";
+            break;
+        case PERFORMANCE_HIGH:
+            title = "High";
+            body  = "655 MHz core clock at 1200 mV.\n\n"
+                    "The most hashrate, and with it the most heat and fan\n"
+                    "noise. Watch the chip temperature on the dashboard for\n"
+                    "a while before leaving it here.";
+            break;
+        case PERFORMANCE_MEDIUM:
+        default:
+            title = "Medium";
+            body  = "600 MHz core clock at 1200 mV.\n\n"
+                    "The stock balance of hashrate, heat and noise, and the\n"
+                    "setting the display starts on.";
+            break;
+    }
+
+    display_control_push_overlay();
+    perf_info_overlay = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(perf_info_overlay, SCREEN_WIDTH, SCREEN_HEIGHT);
+    lv_obj_set_pos(perf_info_overlay, 0, 0);
+    lv_obj_set_style_bg_color(perf_info_overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(perf_info_overlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(perf_info_overlay, 0, 0);
+    lv_obj_set_style_pad_all(perf_info_overlay, 0, 0);
+    lv_obj_clear_flag(perf_info_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    /* Tapping the dimmed surround dismisses, the way every other sheet here
+     * behaves. */
+    lv_obj_add_flag(perf_info_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(perf_info_overlay, settings_perf_info_close, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *card = lv_obj_create(perf_info_overlay);
+    lv_obj_set_size(card, 560, 300);
+    lv_obj_center(card);
+    lv_obj_set_style_bg_color(card, COLOR_CARD_BG, 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(card, COLOR_ACCENT, 0);
+    lv_obj_set_style_border_opa(card, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_radius(card, 18, 0);
+    lv_obj_set_style_shadow_width(card, 0, 0);
+    lv_obj_set_style_pad_all(card, 0, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *heading = lv_label_create(card);
+    lv_label_set_text_fmt(heading, "Performance: %s", title);
+    lv_obj_set_style_text_color(heading, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(heading, &lv_font_montserrat_24, 0);
+    lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 22);
+
+    lv_obj_t *text = lv_label_create(card);
+    lv_label_set_text(text, body);
+    lv_obj_set_style_text_color(text, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_font(text, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(text, LV_ALIGN_TOP_MID, 0, 68);
+
+    lv_obj_t *close = create_settings_button(card, "CLOSE", settings_perf_info_close, false);
+    lv_obj_set_size(close, 180, 48);
+    lv_obj_align(close, LV_ALIGN_BOTTOM_MID, 0, -20);
+}
+
+/* Manual fan speed is only meaningful when the miner is not managing it, so
+ * the controls are not dimmed, they are absent. */
+static void settings_sync_glass_fan_controls(void)
+{
+    if (!glass_fan_manual_cont) return;
+    if (current_settings.auto_fan_control) {
+        lv_obj_add_flag(glass_fan_manual_cont, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(glass_fan_manual_cont, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/* Applied as it is pressed. An Apply button on a single number invites the
+ * reading that the number shown is not the number in force. */
+static void glass_settings_fan_step(lv_event_t *e)
+{
+    const int delta = (int)(intptr_t)lv_event_get_user_data(e);
+    int next = current_settings.fan_speed_percent + delta;
+    if (next < 0) next = 0;
+    if (next > 100) next = 100;
+    if (next == current_settings.fan_speed_percent) return;
+    current_settings.fan_speed_percent = next;
+    if (fan_value_label) {
+        lv_label_set_text_fmt(fan_value_label, "%d%%", next);
+    }
+    BAP_send_fan_speed(next);
+}
+
 static void glass_settings_brightness_step(lv_event_t *e)
 {
     int delta = (int)(intptr_t)lv_event_get_user_data(e);
@@ -1604,45 +1792,75 @@ static void glass_settings_build_display(void)
 static void glass_settings_build_system(void)
 {
     glass_settings_header("SYSTEM");
+    /* Arriving on the page is the deliberate way back to the fork updater
+     * after the default channel has taken the state machine. */
+    ota_default_engaged = false;
     lv_obj_t *perf = glass_settings_card(glass_settings_body, 18, 68, 716, 92);
     lv_obj_t *perf_title = lv_label_create(perf);
     lv_label_set_text(perf_title, "Performance");
     lv_obj_set_style_text_color(perf_title, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(perf_title, &lv_font_montserrat_18, 0);
     lv_obj_set_pos(perf_title, 16, 10);
-    performance_low_btn = create_settings_button(perf, "LOW", settings_performance_low_clicked,
-                                                  current_settings.performance_mode == PERFORMANCE_LOW);
-    performance_medium_btn = create_settings_button(perf, "MEDIUM", settings_performance_medium_clicked,
-                                                     current_settings.performance_mode == PERFORMANCE_MEDIUM);
-    performance_high_btn = create_settings_button(perf, "HIGH", settings_performance_high_clicked,
-                                                   current_settings.performance_mode == PERFORMANCE_HIGH);
-    lv_obj_set_size(performance_low_btn, 205, 48);
-    lv_obj_set_size(performance_medium_btn, 205, 48);
-    lv_obj_set_size(performance_high_btn, 205, 48);
-    lv_obj_set_pos(performance_low_btn, 16, 38);
-    lv_obj_set_pos(performance_medium_btn, 246, 38);
-    lv_obj_set_pos(performance_high_btn, 476, 38);
+    /* Each preset gets an [i] to its right rather than a caption under it:
+     * the card has 92px of height and three lines of explanation would not
+     * fit any of them. */
+    static const struct { const char *text; lv_event_cb_t cb; performance_mode_t mode; int x; }
+        k_perf[] = {
+            { "LOW",    settings_performance_low_clicked,    PERFORMANCE_LOW,    16  },
+            { "MEDIUM", settings_performance_medium_clicked, PERFORMANCE_MEDIUM, 246 },
+            { "HIGH",   settings_performance_high_clicked,   PERFORMANCE_HIGH,   476 },
+        };
+    lv_obj_t **perf_btns[] = { &performance_low_btn, &performance_medium_btn, &performance_high_btn };
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *btn = create_settings_button(perf, k_perf[i].text, k_perf[i].cb,
+                                               current_settings.performance_mode == k_perf[i].mode);
+        lv_obj_set_size(btn, 168, 48);
+        lv_obj_set_pos(btn, k_perf[i].x, 38);
+        *perf_btns[i] = btn;
+
+        lv_obj_t *info = create_settings_button(perf, "i", NULL, false);
+        lv_obj_set_size(info, 44, 48);
+        lv_obj_set_pos(info, k_perf[i].x + 176, 38);
+        lv_obj_add_event_cb(info, settings_perf_info_clicked, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)k_perf[i].mode);
+    }
 
     lv_obj_t *fan = glass_settings_card(glass_settings_body, 18, 172, 716, 92);
     auto_fan_checkbox = settings_toggle_row(fan, "Automatic fan control", 8, 330, 54, true);
     if (current_settings.auto_fan_control) lv_obj_add_state(auto_fan_checkbox, LV_STATE_CHECKED);
     lv_obj_add_event_cb(auto_fan_checkbox, settings_auto_fan_toggled, LV_EVENT_VALUE_CHANGED, NULL);
-    fan_slider = lv_slider_create(fan);
-    lv_obj_set_size(fan_slider, 170, 22);
-    lv_obj_set_ext_click_area(fan_slider, 14);
-    lv_obj_set_pos(fan_slider, 350, 35);
-    lv_slider_set_range(fan_slider, 0, 100);
-    lv_slider_set_value(fan_slider, current_settings.fan_speed_percent, LV_ANIM_OFF);
-    glass_style_slider(fan_slider);
-    lv_obj_add_event_cb(fan_slider, settings_fan_slider_changed, LV_EVENT_VALUE_CHANGED, NULL);
-    fan_value_label = lv_label_create(fan);
+
+    /* One container so auto mode hides the whole apparatus in a single flag
+     * rather than four. */
+    glass_fan_manual_cont = lv_obj_create(fan);
+    lv_obj_set_size(glass_fan_manual_cont, 356, 60);
+    lv_obj_set_pos(glass_fan_manual_cont, 348, 6);
+    lv_obj_set_style_bg_opa(glass_fan_manual_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(glass_fan_manual_cont, 0, 0);
+    lv_obj_set_style_pad_all(glass_fan_manual_cont, 0, 0);
+    lv_obj_clear_flag(glass_fan_manual_cont, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *fan_down = create_settings_button(glass_fan_manual_cont, LV_SYMBOL_MINUS, NULL, false);
+    lv_obj_set_size(fan_down, 96, 48);
+    lv_obj_set_pos(fan_down, 0, 6);
+    lv_obj_add_event_cb(fan_down, glass_settings_fan_step, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)-5);
+
+    fan_value_label = lv_label_create(glass_fan_manual_cont);
     lv_label_set_text_fmt(fan_value_label, "%d%%", current_settings.fan_speed_percent);
     lv_obj_set_style_text_color(fan_value_label, COLOR_ACCENT, 0);
-    lv_obj_set_style_text_font(fan_value_label, &lv_font_montserrat_16, 0);
-    lv_obj_set_pos(fan_value_label, 528, 31);
-    lv_obj_t *fan_apply = create_settings_button(fan, "APPLY", settings_fan_save_clicked, false);
-    lv_obj_set_size(fan_apply, 110, 42);
-    lv_obj_set_pos(fan_apply, 590, 25);
+    lv_obj_set_style_text_font(fan_value_label, &lv_font_montserrat_24, 0);
+    lv_obj_set_width(fan_value_label, 152);
+    lv_obj_set_style_text_align(fan_value_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(fan_value_label, 102, 20);
+
+    lv_obj_t *fan_up = create_settings_button(glass_fan_manual_cont, LV_SYMBOL_PLUS, NULL, false);
+    lv_obj_set_size(fan_up, 96, 48);
+    lv_obj_set_pos(fan_up, 260, 6);
+    lv_obj_add_event_cb(fan_up, glass_settings_fan_step, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)5);
+
+    settings_sync_glass_fan_controls();
 
     ota_section = glass_settings_card(glass_settings_body, 18, 276, 716, 110);
     ota_version_label = lv_label_create(ota_section);
@@ -1684,14 +1902,23 @@ static void glass_settings_build_system(void)
                                              settings_ota_update_clicked, false);
     lv_obj_set_size(ota_update_btn, 166, 44);
     lv_obj_set_pos(ota_update_btn, 350, 62);
-    ota_restore_btn = create_settings_button(ota_section, "OFFICIAL RESTORE",
+    ota_restore_btn = create_settings_button(ota_section, "CHECK DEFAULT",
                                               settings_original_restore_clicked, false);
     lv_obj_set_size(ota_restore_btn, 170, 44);
     lv_obj_set_pos(ota_restore_btn, 530, 62);
     ota_restore_status_label = lv_label_create(ota_section);
-    lv_label_set_text(ota_restore_status_label, "Official release: check before restoring");
+    lv_label_set_text(ota_restore_status_label, "Default release: check before installing");
     lv_obj_add_flag(ota_restore_status_label, LV_OBJ_FLAG_HIDDEN);
     ota_timer = lv_timer_create(ota_update_timer_cb, 500, NULL);
+
+    /* Check on arrival, so the button can name the step it will actually take
+     * instead of offering an install nobody has established is needed. A check
+     * already in flight, or a download waiting to be committed, is left alone. */
+    ota_info_t boot_info;
+    ota_update_get_info(&boot_info);
+    if (boot_info.status == OTA_STATUS_IDLE && !ota_update_is_running()) {
+        ota_check_for_updates();
+    }
 }
 
 static void glass_settings_render(void)
@@ -2290,19 +2517,19 @@ void settings_screen_create(void)
     lv_obj_align(restore_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     ota_restore_status_label = lv_label_create(restore_details_cont);
-    lv_label_set_text(ota_restore_status_label, "Official release: check before restoring");
+    lv_label_set_text(ota_restore_status_label, "Default release: check before installing");
     lv_obj_set_style_text_color(ota_restore_status_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(ota_restore_status_label, &lv_font_montserrat_14, 0);
     lv_obj_align(ota_restore_status_label, LV_ALIGN_TOP_LEFT, 0, 28);
 
-    ota_restore_btn = create_settings_button(restore_details_cont, "CHECK OFFICIAL RELEASE",
+    ota_restore_btn = create_settings_button(restore_details_cont, "CHECK DEFAULT RELEASE",
                                              settings_original_restore_clicked, false);
     lv_obj_set_size(ota_restore_btn, 270, 44);
     lv_obj_align(ota_restore_btn, LV_ALIGN_TOP_LEFT, 0, 54);
 
     lv_obj_t *restore_hint = lv_label_create(restore_details_cont);
     lv_label_set_text(restore_hint,
-                      "Fetches and pins the latest official OTA image. A confirmation explains rollback compatibility before install.");
+                      "Fetches and pins the latest default OTA image. A confirmation explains rollback compatibility before install.");
     lv_label_set_long_mode(restore_hint, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(restore_hint, 650);
     lv_obj_set_style_text_color(restore_hint, COLOR_TEXT_SECONDARY, 0);
@@ -2313,6 +2540,15 @@ void settings_screen_create(void)
 
     // Create OTA update timer (500ms interval)
     ota_timer = lv_timer_create(ota_update_timer_cb, 500, NULL);
+
+    /* Same three gates as the Glass page: find out on arrival so the button
+     * never offers a step whose prerequisite has not happened. */
+    ota_default_engaged = false;
+    ota_info_t boot_info;
+    ota_update_get_info(&boot_info);
+    if (boot_info.status == OTA_STATUS_IDLE && !ota_update_is_running()) {
+        ota_check_for_updates();
+    }
 
     if (glass)
     {
@@ -2538,8 +2774,16 @@ void settings_auto_fan_toggled(lv_event_t *e)
     lv_obj_t *checkbox = lv_event_get_target(e);
     current_settings.auto_fan_control = lv_obj_has_state(checkbox, LV_STATE_CHECKED);
     update_fan_controls();
+    settings_sync_glass_fan_controls();
     if (!current_settings.auto_fan_control && fan_manual_cont) {
         lv_obj_scroll_to_view_recursive(fan_manual_cont, LV_ANIM_ON);
+    }
+
+    /* Sent as it is switched. Handing the fan back to the miner, or taking it
+     * away, is the kind of thing that should be true the moment it looks true. */
+    BAP_send_automatic_fan_control(current_settings.auto_fan_control);
+    if (!current_settings.auto_fan_control) {
+        BAP_send_fan_speed(current_settings.fan_speed_percent);
     }
     printf("Auto fan control: %s\n", current_settings.auto_fan_control ? "ON" : "OFF");
 }

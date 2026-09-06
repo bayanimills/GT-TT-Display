@@ -39,5 +39,6 @@ esp_err_t esp_partition_read(const esp_partition_t *partition, size_t src_offset
                              void *dst, size_t size);
 esp_err_t esp_ota_get_state_partition(const esp_partition_t *partition,
                                       esp_ota_img_states_t *ota_state);
+esp_err_t esp_ota_set_boot_partition(const esp_partition_t *partition);
 esp_err_t esp_ota_mark_app_valid_cancel_rollback(void);
 esp_err_t esp_ota_mark_app_invalid_rollback_and_reboot(void);

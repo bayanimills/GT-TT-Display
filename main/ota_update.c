@@ -48,6 +48,13 @@ static ota_info_t ota_current_info = {0};
 
 static bool ota_auto_check_enabled = false;
 static bool ota_beta_enabled = false;
+
+/* A download that has landed but has not been committed. esp_https_ota_finish
+ * points the bootloader at the new image, so the switch is undone immediately
+ * afterwards and redone from ota_update_install_downloaded(). Without that, an
+ * unrelated power cycle would apply an update the user never asked to install. */
+static const esp_partition_t *s_downloaded_target = NULL;
+static char s_downloaded_version[32] = {0};
 static ota_check_frequency_t ota_check_frequency = OTA_CHECK_MANUAL;
 static bool ota_auto_check_loaded = false;
 static TaskHandle_t ota_auto_task_handle = NULL;
@@ -328,11 +335,12 @@ static void ota_task(void *param)
         lvgl_port_unlock();
     }
 
-    /* Long enough to read the warning, not just to render it. 100 ms was
+    /* Long enough to read the caption, not just to render it. 100 ms was
      * enough for LVGL to draw the screen and far too little for a person to
-     * see it, so the display appeared to die the instant the update was
-     * confirmed. */
-    vTaskDelay(pdMS_TO_TICKS(4500));
+     * see it, so the display appeared to die the instant the button was
+     * pressed. */
+    ota_screen_set_phase(false);
+    vTaskDelay(pdMS_TO_TICKS(2500));
     lvgl_port_task_suspend();
 
     /* The backlight stays on. It used to be cut here so that flash writes,
@@ -492,8 +500,21 @@ static void ota_task(void *param)
         goto cleanup;
     }
 
-    ota_set_status(OTA_STATUS_SUCCESS, 100, NULL);
-    ESP_LOGI(TAG, "OTA update successful! Rebooting in 3 seconds...");
+    /* esp_https_ota_finish has just pointed the bootloader at the new image.
+     * Put it back, so the download is inert until the user asks to install. If
+     * that fails the image is merely armed early, which is the old behaviour,
+     * so carry on rather than throwing away a good download. */
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    if (running && esp_ota_set_boot_partition(running) != ESP_OK) {
+        ESP_LOGW(TAG, "could not un-arm the new image; it will boot on next restart");
+    }
+    s_downloaded_target = target;
+    strncpy(s_downloaded_version, request->release.tag, sizeof(s_downloaded_version) - 1);
+    s_downloaded_version[sizeof(s_downloaded_version) - 1] = 0;
+
+    ota_set_status(OTA_STATUS_DOWNLOADED, 100, NULL);
+    ESP_LOGI(TAG, "OTA image %s downloaded and verified; waiting to install",
+             s_downloaded_version);
 
     /* On throughout now, but make sure: a schedule or a corner tap could have
      * turned it off while this ran. */
@@ -509,8 +530,14 @@ static void ota_task(void *param)
         lvgl_port_unlock();
     }
 
-    vTaskDelay(pdMS_TO_TICKS(3000));
-    esp_restart();
+    /* Hand the screen back. Nothing has been committed, so there is no reason
+     * to hold a full-screen overlay while the user decides. */
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    if (lvgl_port_lock(100)) {
+        ota_screen_hide();
+        lvgl_port_unlock();
+    }
+    goto cleanup_no_status;
 
 cleanup:
     if (ota_handle) {
@@ -531,6 +558,7 @@ cleanup:
         lvgl_port_unlock();
     }
 
+cleanup_no_status:
     // Resume BAP client tasks
     bap_client_resume();
 
@@ -542,6 +570,52 @@ cleanup:
     xSemaphoreGive(ota_mutex);
 
     vTaskDelete(NULL);
+}
+
+/* Committing is fast - a partition switch and a restart - but it still runs
+ * off the LVGL task so the warning can be read before the panel goes. */
+static void ota_commit_task(void *param)
+{
+    (void)param;
+    if (lvgl_port_lock(1000)) {
+        ota_screen_show();
+        ota_screen_set_phase(true);
+        ota_screen_update_progress(100);
+        lvgl_port_unlock();
+    }
+    lcd_backlight_enable();
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    esp_restart();
+}
+
+esp_err_t ota_update_install_downloaded(void)
+{
+    if (!s_downloaded_target) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = esp_ota_set_boot_partition(s_downloaded_target);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        ota_set_status(OTA_STATUS_ERROR, 0, "Could not select the new firmware");
+        return err;
+    }
+
+    ota_set_status(OTA_STATUS_SUCCESS, 100, NULL);
+    ESP_LOGI(TAG, "installing %s from %s", s_downloaded_version,
+             s_downloaded_target->label);
+
+    if (xTaskCreate(ota_commit_task, "ota_commit", 4096, NULL, 5, NULL) != pdPASS) {
+        /* The bootloader is already pointed at the new image, so there is
+         * nothing to be gained by staying here. */
+        esp_restart();
+    }
+    return ESP_OK;
+}
+
+bool ota_update_has_download(void)
+{
+    return s_downloaded_target != NULL;
 }
 
 void ota_update_confirm_running_image(void)
@@ -659,7 +733,10 @@ bool ota_update_available(void)
 {
     ota_init_mutex();
     xSemaphoreTake(ota_mutex, portMAX_DELAY);
-    bool available = ota_current_info.status == OTA_STATUS_UPDATE_AVAILABLE;
+    /* A download waiting to be committed is still something for the user to
+     * do here, so the badge stays lit until it is installed or replaced. */
+    bool available = ota_current_info.status == OTA_STATUS_UPDATE_AVAILABLE ||
+                     ota_current_info.status == OTA_STATUS_DOWNLOADED;
     xSemaphoreGive(ota_mutex);
     return available;
 }
