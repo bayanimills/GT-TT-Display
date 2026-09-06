@@ -420,10 +420,13 @@ int weather_search(const char *query, weather_place_t *out, int max)
         if (!json_number_after(name, "\"latitude\"", &lat) ||
             !json_number_after(name, "\"longitude\"", &lon)) break;
 
-        /* Country disambiguates the many places called the same thing. */
+        /* Country disambiguates the many places called the same thing. The
+         * two fields are bounded explicitly rather than left to fill the
+         * buffer between them: 28 + 2 + 16 fits 48 with room, and the compiler
+         * can see that it does. */
         char country[32] = {0};
         if (json_string_after(name, "\"country\"", country, sizeof(country)) && country[0]) {
-            snprintf(out[n].name, sizeof(out[n].name), "%s, %s", place, country);
+            snprintf(out[n].name, sizeof(out[n].name), "%.28s, %.16s", place, country);
         } else {
             snprintf(out[n].name, sizeof(out[n].name), "%s", place);
         }
