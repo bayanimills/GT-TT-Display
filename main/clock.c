@@ -132,10 +132,10 @@ void clock_screen_create(void)
         clock_title_label = lv_label_create(clock_screen);
         lv_label_set_text(clock_title_label, current_datetitle_text);
         lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_48, 0);
-        /* At 48px the pill stands 63px, so it starts at 6 to clear the card
-         * at 76 rather than overlapping it. */
-        lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 6);
+        lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_20, 0);
+        /* A caption, not a headline. The pill stands 30px at this size, so 23
+         * centres it in the 76px between the top of the screen and the card. */
+        lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 23);
         lv_obj_clear_flag(clock_title_label, LV_OBJ_FLAG_CLICKABLE);
         glass_pill_label(clock_title_label, false);
 
@@ -152,8 +152,8 @@ void clock_screen_create(void)
     clock_title_label = lv_label_create(clock_screen);
     lv_label_set_text(clock_title_label, current_datetitle_text);
     lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_48, 0);
-    lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 6);
+    lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_20, 0);
+    lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 23);
     if (glass) glass_pill_label(clock_title_label, false);
 
     lv_obj_t *parent;
@@ -301,7 +301,7 @@ static void clock_update_time_text(void)
     {
         localtime_r(&now, &time_info);
         strftime(current_date_text, sizeof(current_date_text), "%A, %d %B %Y", &time_info);
-        strftime(current_datetitle_text, sizeof(current_datetitle_text), "%d %B %Y", &time_info);
+        strftime(current_datetitle_text, sizeof(current_datetitle_text), "%B %d, %Y", &time_info);
         strftime(current_weekday_text, sizeof(current_weekday_text), "%A", &time_info);
     }
 
@@ -837,12 +837,13 @@ static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
     /* The large face is monospace, so its cells are simply the font's own
      * advance and the grid the cells impose is the one the font already has.
      * The small face is still Montserrat, where the cells are doing real work. */
-    const bool big = (font == &dejavu_mono_220);
-    /* Both faces are monospace now, so each cell is simply the font's own
-     * advance: 132.44 at 220px and 57.81 at 96px, rounded up. */
-    const int digit_w = big ? 133 : 58;
-    const int colon_w = big ? 133 : 58;
-    const int cell_h  = big ? 200 : 96;
+    const bool big = (font == &montserrat_200);
+    /* Montserrat's figures are proportional - at 200px a "1" advances 74px
+     * against a "4" at 134 - so each cell is the widest digit plus air, and
+     * the colon gets a narrow one of its own so the pairs sit close. */
+    const int digit_w = big ? 138 : 36;
+    const int colon_w = big ? 52 : 16;
+    const int cell_h  = big ? 175 : 56;
 
     lv_obj_t *row = clock_build_fixed_time(clock_time_cont, font, digit_w, colon_w, cell_h);
     /* Five monospace cells take 665 of the 700, so there is no room beside the
@@ -912,9 +913,8 @@ static void clock_build_glass_display(void)
     if (clock_twin_layout)
     {
         if (clock_digital_face)
-            /* Five 58px cells need 290 of the 298. */
             clock_build_digital(clock_display_content, 34, 35, 298, 252,
-                                &dejavu_mono_96);
+                                &lv_font_montserrat_48);
         else
             /* One line under the dial now, not two, so it keeps more of its
              * diameter: 22 + 230 + 8 + 24 against 322. */
@@ -925,10 +925,10 @@ static void clock_build_glass_display(void)
     else
     {
         if (clock_digital_face)
-            /* 700 wide because five 133px cells need 665, and 296 tall to
-             * carry a 200px time over a 48px weekday. */
+            /* The row is 4x138 + 52 = 604 wide and 175 tall, over a 48px
+             * weekday, inside a 296px box. */
             clock_build_digital(clock_display_content, 22, 14, 700, 296,
-                                &dejavu_mono_220);
+                                &montserrat_200);
         else
             /* 10 + 220 + 16 + 57 leaves 19 at the foot of the 322px card,
              * with the weekday now at 48px. */
