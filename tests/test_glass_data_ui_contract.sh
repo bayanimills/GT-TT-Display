@@ -7,9 +7,15 @@ repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 rg -Fq 'lv_label_set_text(block_title_label, "Blockheight")' "$repo_dir/main/block.c"
 ! rg -q 'CURRENT TIP|FEE RATE' "$repo_dir/main/block.c"
 rg -Fq '"DAYS TO HALVING"' "$repo_dir/main/block.c"
-rg -Fq '"Bitcoin Exchange Rate (%s)"' "$repo_dir/main/price.c"
-rg -Fq '"BEST 4-6 YEAR CAGR"' "$repo_dir/main/price.c"
-rg -Fq '"BEST 7-10 YEAR CAGR"' "$repo_dir/main/price.c"
+# The currency is set in settings and shown by the prefix, so the price screen
+# says it once, not three times, and the CAGR captions name the period that
+# won rather than the band that was searched.
+rg -Fq 'lv_label_set_text(price_title_label, "Bitcoin Exchange Rate")' "$repo_dir/main/price.c"
+! rg -q 'Bitcoin Exchange Rate \(' "$repo_dir/main/price.c"
+! rg -q 'BEST 4-6 YEAR CAGR|BEST 7-10 YEAR CAGR' "$repo_dir/main/price.c"
+! rg -q 'Tap price to change currency' "$repo_dir/main/price.c"
+! rg -q 'price_suffix_label' "$repo_dir/main/price.c"
+rg -Fq '"%u YEAR CAGR"' "$repo_dir/main/price.c"
 rg -Fq '"What are the odds?"' "$repo_dir/main/odds.c"
 rg -Fq 'lv_label_set_text(source, "bitview.space")' "$repo_dir/main/odds.c"
 rg -Fq 'odds_show_hashrate = !odds_show_hashrate' "$repo_dir/main/odds.c"
