@@ -37,10 +37,10 @@ rg -Fq 'clock_stat_zone(card, slot, true)' "$repo_dir/main/clock.c"
 rg -Fq 'current_datetitle_text' "$repo_dir/main/clock.c"
 rg -Fq 'current_weekday_text' "$repo_dir/main/clock.c"
 rg -Fq 'settings_timezone_option_list()' "$repo_dir/main/clock.c"
-# The large face is Montserrat at 200px, held still by per-character cells
-# because its figures are proportional; the mono experiment is gone.
-rg -Fq 'montserrat_200' "$repo_dir/main/clock.c"
-! rg -q 'dejavu_mono' "$repo_dir/main/clock.c"
+# Both digital faces are the seven-segment DSEG7, sized to fill their box.
+rg -Fq 'dseg7_196' "$repo_dir/main/clock.c"
+rg -Fq 'dseg7_80' "$repo_dir/main/clock.c"
+! rg -q 'dejavu_mono|montserrat_200' "$repo_dir/main/clock.c"
 # No page caption, and the date belongs under the time rather than in the chrome.
 ! rg -q 'clock_title_label, "CLOCK"' "$repo_dir/main/clock.c"
 rg -Fq 'clock_build_fixed_time' "$repo_dir/main/clock.c"

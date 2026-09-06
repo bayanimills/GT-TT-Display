@@ -813,7 +813,11 @@ static void clock_sync_fixed_time(void)
     if (!clock_digit_cells[0]) return;
     for (int i = 0; i < CLOCK_TIME_CHARS; i++) {
         if (!clock_digit_cells[i]) continue;
-        const char text[2] = { current_time_text[i] ? current_time_text[i] : ' ', 0 };
+        /* The seven-segment face carries digits and a colon and nothing else,
+         * not even a space, so a short string leaves the cell alone rather
+         * than asking for a glyph that does not exist. */
+        if (!current_time_text[i]) continue;
+        const char text[2] = { current_time_text[i], 0 };
         lv_label_set_text(clock_digit_cells[i], text);
     }
 }
@@ -837,13 +841,13 @@ static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
     /* The large face is monospace, so its cells are simply the font's own
      * advance and the grid the cells impose is the one the font already has.
      * The small face is still Montserrat, where the cells are doing real work. */
-    const bool big = (font == &montserrat_200);
-    /* Montserrat's figures are proportional - at 200px a "1" advances 74px
-     * against a "4" at 134 - so each cell is the widest digit plus air, and
-     * the colon gets a narrow one of its own so the pairs sit close. */
-    const int digit_w = big ? 138 : 36;
-    const int colon_w = big ? 52 : 16;
-    const int cell_h  = big ? 175 : 56;
+    /* DSEG7 is monospace, so each cell is exactly the font's advance and the
+     * row is as wide as the digits can ever draw. Both sizes were chosen to
+     * fill their box: 4x160 + 40 = 680 of 700, and 4x66 + 16 = 280 of 298. */
+    const bool big = (font == &dseg7_196);
+    const int digit_w = big ? 160 : 66;
+    const int colon_w = big ? 40 : 16;
+    const int cell_h  = big ? 205 : 88;
 
     lv_obj_t *row = clock_build_fixed_time(clock_time_cont, font, digit_w, colon_w, cell_h);
     /* Five monospace cells take 665 of the 700, so there is no room beside the
@@ -914,7 +918,7 @@ static void clock_build_glass_display(void)
     {
         if (clock_digital_face)
             clock_build_digital(clock_display_content, 34, 35, 298, 252,
-                                &lv_font_montserrat_48);
+                                &dseg7_80);
         else
             /* One line under the dial now, not two, so it keeps more of its
              * diameter: 22 + 230 + 8 + 24 against 322. */
@@ -925,10 +929,8 @@ static void clock_build_glass_display(void)
     else
     {
         if (clock_digital_face)
-            /* The row is 4x138 + 52 = 604 wide and 175 tall, over a 48px
-             * weekday, inside a 296px box. */
             clock_build_digital(clock_display_content, 22, 14, 700, 296,
-                                &montserrat_200);
+                                &dseg7_196);
         else
             /* 10 + 220 + 16 + 57 leaves 19 at the foot of the 322px card,
              * with the weekday now at 48px. */
