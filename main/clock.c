@@ -132,8 +132,10 @@ void clock_screen_create(void)
         clock_title_label = lv_label_create(clock_screen);
         lv_label_set_text(clock_title_label, current_datetitle_text);
         lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_24, 0);
-        lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 22);
+        lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_48, 0);
+        /* At 48px the pill stands 63px, so it starts at 6 to clear the card
+         * at 76 rather than overlapping it. */
+        lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 6);
         lv_obj_clear_flag(clock_title_label, LV_OBJ_FLAG_CLICKABLE);
         glass_pill_label(clock_title_label, false);
 
@@ -150,8 +152,8 @@ void clock_screen_create(void)
     clock_title_label = lv_label_create(clock_screen);
     lv_label_set_text(clock_title_label, current_datetitle_text);
     lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_24, 0);
-    lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 22);
+    lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_48, 0);
+    lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 6);
     if (glass) glass_pill_label(clock_title_label, false);
 
     lv_obj_t *parent;
@@ -760,7 +762,7 @@ static void clock_build_face(lv_obj_t *parent, int x, int y, int size)
     const bool twin = clock_twin_layout;
 
     clock_date_label = clock_text_label(parent, current_weekday_text,
-                                        twin ? &lv_font_montserrat_20 : &lv_font_montserrat_28,
+                                        twin ? &lv_font_montserrat_40 : &lv_font_montserrat_48,
                                         COLOR_TEXT_PRIMARY);
     lv_obj_set_width(clock_date_label, size + 120);
     lv_obj_set_style_text_align(clock_date_label, LV_TEXT_ALIGN_CENTER, 0);
@@ -832,29 +834,39 @@ static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
     lv_obj_set_style_pad_all(clock_time_cont, 0, 0);
     lv_obj_clear_flag(clock_time_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Cell widths are the widest glyph in each face plus a little air, so the
-     * row is as wide as the time can ever be and never wider. */
-    const bool big = (font == &montserrat_140);
-    const int digit_w = big ? 98 : 36;
-    const int colon_w = big ? 40 : 16;
-    const int cell_h  = big ? 150 : 56;
+    /* The large face is monospace, so its cells are simply the font's own
+     * advance and the grid the cells impose is the one the font already has.
+     * The small face is still Montserrat, where the cells are doing real work. */
+    const bool big = (font == &dejavu_mono_220);
+    /* Both faces are monospace now, so each cell is simply the font's own
+     * advance: 132.44 at 220px and 57.81 at 96px, rounded up. */
+    const int digit_w = big ? 133 : 58;
+    const int colon_w = big ? 133 : 58;
+    const int cell_h  = big ? 200 : 96;
 
     lv_obj_t *row = clock_build_fixed_time(clock_time_cont, font, digit_w, colon_w, cell_h);
-    lv_obj_align(row, LV_ALIGN_CENTER, clock_use_24h ? 0 : -18, big ? -22 : -12);
+    /* Five monospace cells take 665 of the 700, so there is no room beside the
+     * digits for anything. The row stays centred in both formats and the
+     * meridiem moves down to share the weekday's line. */
+    lv_obj_align(row, LV_ALIGN_CENTER, 0, big ? -24 : -12);
     clock_time_label = NULL;
 
     clock_ampm_label = clock_text_label(clock_time_cont, current_ampm_text,
-                                        &lv_font_montserrat_24, COLOR_TEXT_SECONDARY);
-    lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, -24, big ? -6 : 18);
+                                        big ? &lv_font_montserrat_40 : &lv_font_montserrat_24,
+                                        COLOR_TEXT_SECONDARY);
+    /* Neither face leaves room beside the digits, so the meridiem shares the
+     * weekday's line in both. */
+    lv_obj_align(clock_ampm_label, LV_ALIGN_BOTTOM_RIGHT, big ? -24 : -14,
+                 big ? -16 : -10);
 
     /* The weekday, to match the analogue face. The numeric date is the title
      * and does not need saying twice. */
     clock_date_label = clock_text_label(clock_time_cont, current_weekday_text,
-                                        big ? &lv_font_montserrat_24 : &lv_font_montserrat_14,
+                                        big ? &lv_font_montserrat_48 : &lv_font_montserrat_28,
                                         COLOR_TEXT_SECONDARY);
     lv_obj_set_width(clock_date_label, w - 24);
     lv_obj_set_style_text_align(clock_date_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(clock_date_label, LV_ALIGN_BOTTOM_MID, 0, big ? -20 : -10);
+    lv_obj_align(clock_date_label, LV_ALIGN_BOTTOM_MID, 0, big ? -12 : -8);
 }
 
 static void clock_build_glass_display(void)
@@ -900,8 +912,9 @@ static void clock_build_glass_display(void)
     if (clock_twin_layout)
     {
         if (clock_digital_face)
+            /* Five 58px cells need 290 of the 298. */
             clock_build_digital(clock_display_content, 34, 35, 298, 252,
-                                &lv_font_montserrat_48);
+                                &dejavu_mono_96);
         else
             /* One line under the dial now, not two, so it keeps more of its
              * diameter: 22 + 230 + 8 + 24 against 322. */
@@ -912,12 +925,14 @@ static void clock_build_glass_display(void)
     else
     {
         if (clock_digital_face)
-            clock_build_digital(clock_display_content, 52, 18, 640, 286,
-                                &montserrat_140);
+            /* 700 wide because five 133px cells need 665, and 296 tall to
+             * carry a 200px time over a 48px weekday. */
+            clock_build_digital(clock_display_content, 22, 14, 700, 296,
+                                &dejavu_mono_220);
         else
-            /* With only the weekday underneath, the dial takes back the room
-             * the time used to need: 10 + 240 + 16 + 34 against 322. */
-            clock_build_face(clock_display_content, 252, 10, 240);
+            /* 10 + 220 + 16 + 57 leaves 19 at the foot of the 322px card,
+             * with the weekday now at 48px. */
+            clock_build_face(clock_display_content, 262, 10, 220);
     }
 }
 
