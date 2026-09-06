@@ -1330,29 +1330,37 @@ static void build_hero(card_t *c)
     bool corner_right = !corner_left;
 
     lv_obj_t *cap = glass_caption(card, widget_caption(c->id));
-    lv_obj_set_pos(cap, corner_left ? 26 + 60 : 26, 18);
 
     if (c->id != GLASS_WIDGET_HASHRATE) {
         int left = corner_left ? 86 : 26;
         int right = corner_right ? 86 : 26;
-        widget_icon(card, c->id, left, 48);
+        /* The icon rides with the caption, as it does on the twin cards. It
+         * used to sit halfway down the card beside a left-aligned figure;
+         * with the figure at the foot on the right that left it stranded in
+         * the middle of an empty pane. */
+        widget_icon(card, c->id, left, 18);
+        lv_obj_set_pos(cap, left + 34, 22);
 
         const lv_font_t *vf = c->id == GLASS_WIDGET_POOL
                             ? &lv_font_montserrat_28 : &lv_font_montserrat_48;
         c->value = glass_label(card, "--", vf, LV_OPA_COVER);
         lv_obj_set_width(c->value, CONTENT_W - left - right - 42);
         lv_label_set_long_mode(c->value, LV_LABEL_LONG_DOT);
-        lv_obj_set_pos(c->value, left + 42, 54);
+        lv_obj_set_style_text_align(c->value, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_align(c->value, LV_ALIGN_BOTTOM_RIGHT, -right,
+                     widget_has_sub(c->id) ? -34 : -18);
 
         if (widget_has_sub(c->id)) {
             c->sub = glass_subvalue(card, "");
             lv_obj_set_width(c->sub, CONTENT_W - left - right);
             lv_label_set_long_mode(c->sub, LV_LABEL_LONG_DOT);
-            lv_obj_align(c->sub, LV_ALIGN_BOTTOM_LEFT, left, -18);
+            lv_obj_set_style_text_align(c->sub, LV_TEXT_ALIGN_RIGHT, 0);
+            lv_obj_align(c->sub, LV_ALIGN_BOTTOM_RIGHT, -right, -12);
         }
         return;
     }
 
+    lv_obj_set_pos(cap, corner_left ? 26 + 60 : 26, 18);
     c->value = glass_label(card, "--", &montserrat_120, LV_OPA_COVER);
     lv_obj_align(c->value, LV_ALIGN_LEFT_MID, 22, 14);
 
@@ -1380,17 +1388,23 @@ static void build_twin_card(card_t *c)
     lv_obj_t *cap = glass_caption(card, widget_caption(c->id));
     lv_obj_set_pos(cap, 56, 22);
 
+    /* Values sit flush right and pinned to the bottom. Left-aligned figures
+     * of different lengths gave every card a different ragged edge, and a
+     * card with no second line left its lower half empty while its neighbour
+     * was full. Caption at the top, figure at the foot, in every card. */
     const lv_font_t *vf = (c->id == GLASS_WIDGET_POOL) ? &lv_font_montserrat_22 : &lv_font_montserrat_36;
     c->value = glass_label(card, "--", vf, LV_OPA_COVER);
     lv_obj_set_width(c->value, TWIN_W - 48);
     lv_label_set_long_mode(c->value, LV_LABEL_LONG_DOT);
-    lv_obj_align(c->value, LV_ALIGN_BOTTOM_LEFT, 22, widget_has_sub(c->id) ? -38 : -22);
+    lv_obj_set_style_text_align(c->value, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(c->value, LV_ALIGN_BOTTOM_RIGHT, -22, widget_has_sub(c->id) ? -34 : -18);
 
     if (widget_has_sub(c->id)) {
         c->sub = glass_subvalue(card, "");
         lv_obj_set_width(c->sub, TWIN_W - 48);
         lv_label_set_long_mode(c->sub, LV_LABEL_LONG_DOT);
-        lv_obj_align(c->sub, LV_ALIGN_BOTTOM_LEFT, 24, -14);
+        lv_obj_set_style_text_align(c->sub, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_align(c->sub, LV_ALIGN_BOTTOM_RIGHT, -22, -12);
     }
 }
 
