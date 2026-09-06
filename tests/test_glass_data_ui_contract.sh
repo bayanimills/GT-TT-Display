@@ -27,6 +27,9 @@ rg -Fq '"ANALOGUE"' "$repo_dir/main/clock.c"
 rg -Fq '"DIGITAL"' "$repo_dir/main/clock.c"
 rg -Fq 'clock_stat_kind[slot] = ' "$repo_dir/main/clock.c"
 rg -Fq '"MINER HASHRATE  -  TAP"' "$repo_dir/main/clock.c"
+# No page caption, and the date belongs under the time rather than in the chrome.
+! rg -q 'clock_title_label, "CLOCK"' "$repo_dir/main/clock.c"
+rg -Fq 'clock_build_fixed_time' "$repo_dir/main/clock.c"
 
 # Theme is fixed-height, wallpaper-first, immediately selectable and paged.
 rg -Fq '{ "Theme",   "Wallpaper + accent"' "$repo_dir/main/settings.c"

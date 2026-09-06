@@ -88,6 +88,7 @@ static void clock_prefs_save(void);
 static void clock_build_glass_display(void);
 static void clock_build_glass_settings(void);
 static void clock_update_analogue(const struct tm *time_info);
+static void clock_sync_fixed_time(void);
 static void clock_update_glass_stats(void);
 static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
                                 const lv_font_t *font);
@@ -118,24 +119,9 @@ void clock_screen_create(void)
     {
         clock_prefs_load();
 
-        clock_title_label = lv_label_create(clock_screen);
-        lv_label_set_text(clock_title_label, "CLOCK");
-        lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_24, 0);
-        lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 12);
-        lv_obj_clear_flag(clock_title_label, LV_OBJ_FLAG_CLICKABLE);
-        glass_pill_label(clock_title_label, false);
-
-        clock_date_label = lv_label_create(clock_screen);
-        lv_label_set_text(clock_date_label, current_date_text);
-        lv_obj_set_style_text_color(clock_date_label, COLOR_TEXT_SECONDARY, 0);
-        lv_obj_set_style_text_font(clock_date_label, &lv_font_montserrat_18, 0);
-        lv_obj_set_width(clock_date_label, 560);
-        lv_obj_set_style_text_align(clock_date_label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(clock_date_label, LV_ALIGN_TOP_MID, 0, 43);
-        lv_obj_clear_flag(clock_date_label, LV_OBJ_FLAG_CLICKABLE);
-        glass_pill_label(clock_date_label, false);
-
+        /* No title and no date up here. A screen showing a clock does not
+         * need to be captioned "CLOCK", and the date belongs with the time it
+         * qualifies, which each layout now places directly beneath it. */
         clock_build_glass_display();
         clock_build_glass_settings();
         clock_start_sntp();
@@ -145,20 +131,6 @@ void clock_screen_create(void)
         glass_screen_ready(clock_screen);
         return;
     }
-
-    clock_title_label = lv_label_create(clock_screen);
-    lv_label_set_text(clock_title_label, "CLOCK");
-    lv_obj_set_style_text_color(clock_title_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(clock_title_label, &lv_font_montserrat_24, 0);
-    lv_obj_align(clock_title_label, LV_ALIGN_TOP_MID, 0, 14);
-    if (glass) glass_pill_label(clock_title_label, false);
-
-    clock_date_label = lv_label_create(clock_screen);
-    lv_label_set_text(clock_date_label, current_date_text);
-    lv_obj_set_style_text_color(clock_date_label, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(clock_date_label, &lv_font_montserrat_14, 0);
-    lv_obj_align(clock_date_label, LV_ALIGN_TOP_MID, 0, 45);
-    if (glass) glass_pill_label(clock_date_label, false);
 
     lv_obj_t *parent;
     if (glass)
@@ -179,12 +151,6 @@ void clock_screen_create(void)
         lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     }
     lv_obj_align(parent, LV_ALIGN_TOP_MID, 0, 76);
-
-    lv_obj_t *caption = lv_label_create(parent);
-    lv_label_set_text(caption, "TIME");
-    lv_obj_set_style_text_color(caption, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(caption, &lv_font_montserrat_14, 0);
-    lv_obj_align(caption, LV_ALIGN_TOP_MID, 0, 24);
 
     clock_time_cont = lv_obj_create(parent);
     lv_obj_set_size(clock_time_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -331,6 +297,9 @@ static void clock_update_time_text(void)
     {
         lv_label_set_text(clock_time_label, current_time_text);
     }
+    /* The digital faces draw the time a character at a time; see
+     * clock_build_fixed_time for why. */
+    clock_sync_fixed_time();
     if (clock_ampm_label)
     {
         lv_label_set_text(clock_ampm_label, current_ampm_text);
@@ -454,9 +423,9 @@ static void clock_open_settings_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
     if (!clock_settings_card || !clock_display_card) return;
+    /* The date rides inside the display card now, so hiding the card hides
+     * it too; there is nothing left up here to hide separately. */
     lv_obj_add_flag(clock_display_card, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(clock_title_label, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(clock_date_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(clock_settings_card, LV_OBJ_FLAG_HIDDEN);
     clock_refresh_choices();
     /* The grabber predates this pane in z-order. A full invalidation keeps its
@@ -469,8 +438,6 @@ static void clock_close_settings_cb(lv_event_t *e)
     LV_UNUSED(e);
     if (!clock_settings_card || !clock_screen) return;
     lv_obj_add_flag(clock_settings_card, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(clock_title_label, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(clock_date_label, LV_OBJ_FLAG_HIDDEN);
     clock_build_glass_display();
     lv_obj_clear_flag(clock_display_card, LV_OBJ_FLAG_HIDDEN);
     clock_update_time_text();
@@ -684,22 +651,87 @@ static void clock_build_face(lv_obj_t *parent, int x, int y, int size)
     lv_obj_set_style_pad_all(hub, 0, 0);
     lv_obj_clear_flag(hub, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    clock_time_cont = lv_obj_create(clock_face);
-    lv_obj_set_size(clock_time_cont, 116, 38);
-    lv_obj_align(clock_time_cont, LV_ALIGN_BOTTOM_MID, 0, -32);
-    lv_obj_set_style_radius(clock_time_cont, 12, 0);
-    lv_obj_set_style_bg_color(clock_time_cont, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(clock_time_cont, LV_OPA_30, 0);
+    /* No digital inset on the dial. A readout floating over the hands is the
+     * one thing an analogue face is for not needing, and it fought the second
+     * hand for the same pixels. The time and date go under the dial instead,
+     * on the parent, so they are not clipped by it. */
+    lv_obj_t *below = parent;
+    const int face_bottom = y + size;
+    const bool twin = clock_twin_layout;
+
+    clock_time_cont = lv_obj_create(below);
+    lv_obj_set_size(clock_time_cont, size + 80, twin ? 30 : 58);
+    lv_obj_set_pos(clock_time_cont, x - 40, face_bottom + (twin ? 2 : 6));
+    lv_obj_set_style_bg_opa(clock_time_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(clock_time_cont, 0, 0);
     lv_obj_set_style_pad_all(clock_time_cont, 0, 0);
     lv_obj_clear_flag(clock_time_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
     clock_time_label = clock_text_label(clock_time_cont, current_time_text,
-                                        &lv_font_montserrat_20, COLOR_TEXT_PRIMARY);
-    lv_obj_align(clock_time_label, LV_ALIGN_CENTER, -9, 0);
+                                        twin ? &lv_font_montserrat_24 : &lv_font_montserrat_48,
+                                        COLOR_TEXT_PRIMARY);
+    lv_obj_align(clock_time_label, LV_ALIGN_CENTER, clock_use_24h ? 0 : -16, 0);
     clock_ampm_label = clock_text_label(clock_time_cont, current_ampm_text,
-                                        &lv_font_montserrat_12, COLOR_TEXT_SECONDARY);
-    lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, -7, 0);
+                                        twin ? &lv_font_montserrat_12 : &lv_font_montserrat_20,
+                                        COLOR_TEXT_SECONDARY);
+    lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, twin ? 8 : 16, twin ? 4 : 10);
+
+    clock_date_label = clock_text_label(below, current_date_text,
+                                        twin ? &lv_font_montserrat_12 : &lv_font_montserrat_20,
+                                        COLOR_TEXT_SECONDARY);
+    lv_obj_set_width(clock_date_label, size + 120);
+    lv_obj_set_style_text_align(clock_date_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(clock_date_label, x - 60,
+                   face_bottom + (twin ? 34 : 68));
+}
+
+/* Montserrat's figures are proportional, and at 140px the spread is extreme:
+ * a "1" advances 52px against a "4" at 94px, so a centred HH:MM slides by up
+ * to 167px between 11:11 and 04:44 - the clock visibly jumps every time a
+ * digit changes. Each character gets its own fixed-width cell instead, which
+ * costs five labels and holds the face still. The time is always five
+ * characters, "%02d:%02d", so the row never has to be rebuilt. */
+#define CLOCK_TIME_CHARS 5
+
+static lv_obj_t *clock_digit_cells[CLOCK_TIME_CHARS];
+
+static lv_obj_t *clock_build_fixed_time(lv_obj_t *parent, const lv_font_t *font,
+                                        int digit_w, int colon_w, int cell_h)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, digit_w * 4 + colon_w, cell_h);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    int x = 0;
+    for (int i = 0; i < CLOCK_TIME_CHARS; i++) {
+        const bool colon = (i == 2);
+        const int cw = colon ? colon_w : digit_w;
+        lv_obj_t *cell = lv_label_create(row);
+        const char text[2] = { current_time_text[i] ? current_time_text[i] : '0', 0 };
+        lv_label_set_text(cell, text);
+        lv_obj_set_style_text_color(cell, COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_font(cell, font, 0);
+        lv_obj_set_style_text_align(cell, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_width(cell, cw);
+        lv_obj_set_pos(cell, x, 0);
+        lv_obj_clear_flag(cell, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        clock_digit_cells[i] = cell;
+        x += cw;
+    }
+    return row;
+}
+
+static void clock_sync_fixed_time(void)
+{
+    if (!clock_digit_cells[0]) return;
+    for (int i = 0; i < CLOCK_TIME_CHARS; i++) {
+        if (!clock_digit_cells[i]) continue;
+        const char text[2] = { current_time_text[i] ? current_time_text[i] : ' ', 0 };
+        lv_label_set_text(clock_digit_cells[i], text);
+    }
 }
 
 static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
@@ -718,12 +750,29 @@ static void clock_build_digital(lv_obj_t *parent, int x, int y, int w, int h,
     lv_obj_set_style_pad_all(clock_time_cont, 0, 0);
     lv_obj_clear_flag(clock_time_cont, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    clock_time_label = clock_text_label(clock_time_cont, current_time_text,
-                                        font, COLOR_TEXT_PRIMARY);
-    lv_obj_align(clock_time_label, LV_ALIGN_CENTER, clock_use_24h ? 0 : -18, 0);
+    /* Cell widths are the widest glyph in each face plus a little air, so the
+     * row is as wide as the time can ever be and never wider. */
+    const bool big = (font == &montserrat_140);
+    const int digit_w = big ? 98 : 36;
+    const int colon_w = big ? 40 : 16;
+    const int cell_h  = big ? 150 : 56;
+
+    lv_obj_t *row = clock_build_fixed_time(clock_time_cont, font, digit_w, colon_w, cell_h);
+    lv_obj_align(row, LV_ALIGN_CENTER, clock_use_24h ? 0 : -18, big ? -22 : -12);
+    clock_time_label = NULL;
+
     clock_ampm_label = clock_text_label(clock_time_cont, current_ampm_text,
                                         &lv_font_montserrat_24, COLOR_TEXT_SECONDARY);
-    lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, -24, 18);
+    lv_obj_align(clock_ampm_label, LV_ALIGN_RIGHT_MID, -24, big ? -6 : 18);
+
+    /* The date sits under the time it qualifies rather than at the top of the
+     * screen two elements away from it. */
+    clock_date_label = clock_text_label(clock_time_cont, current_date_text,
+                                        big ? &lv_font_montserrat_24 : &lv_font_montserrat_14,
+                                        COLOR_TEXT_SECONDARY);
+    lv_obj_set_width(clock_date_label, w - 24);
+    lv_obj_set_style_text_align(clock_date_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(clock_date_label, LV_ALIGN_BOTTOM_MID, 0, big ? -20 : -10);
 }
 
 static void clock_build_glass_display(void)
@@ -761,6 +810,8 @@ static void clock_build_glass_display(void)
     clock_time_cont = NULL;
     clock_time_label = NULL;
     clock_ampm_label = NULL;
+    clock_date_label = NULL;
+    memset(clock_digit_cells, 0, sizeof(clock_digit_cells));
     memset(clock_stat_value, 0, sizeof(clock_stat_value));
     memset(clock_stat_caption, 0, sizeof(clock_stat_caption));
 
@@ -770,17 +821,21 @@ static void clock_build_glass_display(void)
             clock_build_digital(clock_display_content, 34, 35, 298, 252,
                                 &lv_font_montserrat_48);
         else
-            clock_build_face(clock_display_content, 64, 35, 252);
+            /* The dial gives up 32px so the time and date can sit under it
+             * instead of on top of the hands. */
+            clock_build_face(clock_display_content, 75, 22, 230);
         clock_stat_card(clock_display_content, 0, 34);
         clock_stat_card(clock_display_content, 1, 168);
     }
     else
     {
         if (clock_digital_face)
-            clock_build_digital(clock_display_content, 52, 24, 640, 274,
+            clock_build_digital(clock_display_content, 52, 18, 640, 286,
                                 &montserrat_140);
         else
-            clock_build_face(clock_display_content, 224, 20, 282);
+            /* 208px leaves exactly enough under the dial for a 48px time and
+             * a 20px date inside the 322px card: 8 + 208 + 6 + 57 + 4 + 24. */
+            clock_build_face(clock_display_content, 268, 8, 208);
     }
 }
 
