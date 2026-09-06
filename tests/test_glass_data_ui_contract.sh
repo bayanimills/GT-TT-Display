@@ -25,8 +25,13 @@ rg -Fq 'odds_show_hashrate = !odds_show_hashrate' "$repo_dir/main/odds.c"
 rg -Fq 'static bool clock_twin_layout = true;' "$repo_dir/main/clock.c"
 rg -Fq '"ANALOGUE"' "$repo_dir/main/clock.c"
 rg -Fq '"DIGITAL"' "$repo_dir/main/clock.c"
-rg -Fq 'clock_stat_kind[slot] = ' "$repo_dir/main/clock.c"
-rg -Fq '"MINER HASHRATE  -  TAP"' "$repo_dir/main/clock.c"
+rg -Fq 'clock_stat_kind[slot] =' "$repo_dir/main/clock.c"
+# The stat cards are stepped by two lit halves, not by a whole-card tap, so
+# the caption no longer has to carry the instruction.
+rg -Fq '"MINER HASHRATE"' "$repo_dir/main/clock.c"
+! rg -q 'TAP' "$repo_dir/main/clock.c"
+rg -Fq 'clock_stat_zone(card, slot, false)' "$repo_dir/main/clock.c"
+rg -Fq 'clock_stat_zone(card, slot, true)' "$repo_dir/main/clock.c"
 # No page caption, and the date belongs under the time rather than in the chrome.
 ! rg -q 'clock_title_label, "CLOCK"' "$repo_dir/main/clock.c"
 rg -Fq 'clock_build_fixed_time' "$repo_dir/main/clock.c"

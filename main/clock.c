@@ -528,12 +528,12 @@ static void clock_build_glass_settings(void)
 static const char *clock_stat_name(clock_stat_t kind)
 {
     static const char *name[CLOCK_STAT_COUNT] = {
-        "BITCOIN RATE  -  TAP", "MINER HASHRATE  -  TAP",
-        "NETWORK DIFFICULTY  -  TAP", "BLOCK HEIGHT  -  TAP",
-        "DAYS TO HALVING  -  TAP", "ASIC TEMPERATURE  -  TAP",
-        "POWER  -  TAP", "BEST DIFFICULTY  -  TAP",
+        "BITCOIN RATE", "MINER HASHRATE",
+        "NETWORK DIFFICULTY", "BLOCK HEIGHT",
+        "DAYS TO HALVING", "ASIC TEMPERATURE",
+        "POWER", "BEST DIFFICULTY",
     };
-    return kind < CLOCK_STAT_COUNT ? name[kind] : "METRIC  -  TAP";
+    return kind < CLOCK_STAT_COUNT ? name[kind] : "METRIC";
 }
 
 static void clock_rebuild_display_async(void *unused)
@@ -543,15 +543,57 @@ static void clock_rebuild_display_async(void *unused)
     clock_update_time_text();
 }
 
+/* Packed as slot<<1 | forward, because a click callback carries one pointer
+ * and there are four zones. */
 static void clock_stat_clicked(lv_event_t *e)
 {
-    const int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    const int packed = (int)(intptr_t)lv_event_get_user_data(e);
+    const int slot = packed >> 1;
+    const bool forward = (packed & 1) != 0;
     if (slot < 0 || slot > 1) return;
+
+    /* Skip whatever the other card is already showing, in whichever direction
+     * is being asked for, so back and forward are true inverses. */
     do {
-        clock_stat_kind[slot] = (uint8_t)((clock_stat_kind[slot] + 1) % CLOCK_STAT_COUNT);
+        const int step = forward ? 1 : (CLOCK_STAT_COUNT - 1);
+        clock_stat_kind[slot] =
+            (uint8_t)((clock_stat_kind[slot] + step) % CLOCK_STAT_COUNT);
     } while (clock_stat_kind[slot] == clock_stat_kind[1 - slot]);
+
     clock_prefs_save();
     lv_async_call(clock_rebuild_display_async, NULL);
+}
+
+/* One half of a stat card. The chevron is always there so the control is
+ * discoverable without tapping, and the half lights on press so it is obvious
+ * which way the tap went. */
+static void clock_stat_zone(lv_obj_t *card, int slot, bool forward)
+{
+    lv_obj_t *zone = lv_obj_create(card);
+    lv_obj_set_size(zone, 155, 112);
+    lv_obj_set_pos(zone, forward ? 163 : 4, 4);
+    lv_obj_set_style_radius(zone, 20, 0);
+    lv_obj_set_style_bg_opa(zone, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(zone, 0, 0);
+    lv_obj_set_style_shadow_width(zone, 0, 0);
+    lv_obj_set_style_pad_all(zone, 0, 0);
+    lv_obj_set_style_bg_color(zone, COLOR_ACCENT, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(zone, LV_OPA_30, LV_STATE_PRESSED);
+    lv_obj_clear_flag(zone, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(zone, LV_OBJ_FLAG_CLICKABLE);
+    /* Reclaim the 4px inset so the whole half is still hittable. */
+    lv_obj_set_ext_click_area(zone, 6);
+    lv_obj_add_event_cb(zone, clock_stat_clicked, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)((slot << 1) | (forward ? 1 : 0)));
+
+    lv_obj_t *chev = lv_label_create(zone);
+    lv_label_set_text(chev, forward ? LV_SYMBOL_RIGHT : LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_color(chev, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_opa(chev, (lv_opa_t)110, 0);
+    lv_obj_set_style_text_font(chev, &lv_font_montserrat_16, 0);
+    lv_obj_align(chev, forward ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID,
+                 forward ? -12 : 12, 0);
+    lv_obj_clear_flag(chev, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 }
 
 static lv_obj_t *clock_stat_card(lv_obj_t *parent, int slot, int y)
@@ -568,20 +610,31 @@ static lv_obj_t *clock_stat_card(lv_obj_t *parent, int slot, int y)
     lv_obj_set_style_shadow_width(card, 0, 0);
     lv_obj_set_style_pad_all(card, 0, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_color(card, COLOR_ACCENT, LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(card, LV_OPA_20, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(card, clock_stat_clicked, LV_EVENT_CLICKED,
-                        (void *)(intptr_t)slot);
+    /* The card itself is no longer a button. Cycling in one direction only
+     * meant overshooting cost seven more taps; the two halves below step
+     * either way, and light up so which half does what is visible. */
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
 
+    clock_stat_zone(card, slot, false);
+    clock_stat_zone(card, slot, true);
+
+    /* Text last, so it draws over the zones, and not clickable, so a tap on
+     * it still reaches the half underneath. Inset past both chevrons. */
     clock_stat_caption[slot] = clock_text_label(card,
                                                 clock_stat_name((clock_stat_t)clock_stat_kind[slot]),
                                                 &lv_font_montserrat_12,
                                                 COLOR_TEXT_SECONDARY);
-    lv_obj_set_pos(clock_stat_caption[slot], 22, 18);
+    lv_obj_set_width(clock_stat_caption[slot], 228);
+    lv_label_set_long_mode(clock_stat_caption[slot], LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(clock_stat_caption[slot], LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(clock_stat_caption[slot], 47, 24);
+
     clock_stat_value[slot] = clock_text_label(card, "--", &lv_font_montserrat_32,
                                               COLOR_TEXT_PRIMARY);
-    lv_obj_set_pos(clock_stat_value[slot], 22, 53);
+    lv_obj_set_width(clock_stat_value[slot], 228);
+    lv_label_set_long_mode(clock_stat_value[slot], LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(clock_stat_value[slot], LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(clock_stat_value[slot], 47, 56);
     return card;
 }
 
