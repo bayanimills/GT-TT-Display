@@ -44,6 +44,15 @@ static uint32_t rehome_our_mask = 0;
 static bool rehome_parse_ipv4(const char *text, uint32_t *out);
 static void wifi_check_same_network_as_miner(void);
 
+/* This display's own link quality, as opposed to the miner's RSSI that arrives
+ * over BAP. -128 when there is no association to ask about. */
+static int wifi_own_rssi(void)
+{
+    wifi_ap_record_t ap = {0};
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return -128;
+    return ap.rssi;
+}
+
 
 
 static lv_obj_t * wifi_screen = NULL;
@@ -127,8 +136,11 @@ static void wifi_refresh_status_ui(void)
             snprintf(signal_text, sizeof(signal_text), "Check password and try again");
             lv_obj_set_style_text_color(signal_label, COLOR_RED, 0);
         } else if (wifi_connection_state == WIFI_CONNECTION_STATE_CONNECTED &&
-                   current_wifi_info.signal_strength > -128) {
-            snprintf(signal_text, sizeof(signal_text), "Signal: %d dBm", current_wifi_info.signal_strength);
+                   wifi_own_rssi() > -128) {
+            /* This display's own radio. current_wifi_info.signal_strength is
+             * the RSSI the miner reports over BAP, which is a different aerial
+             * in a different box and says nothing about this one's link. */
+            snprintf(signal_text, sizeof(signal_text), "Signal: %d dBm", wifi_own_rssi());
             lv_obj_set_style_text_color(signal_label, COLOR_TEXT_PRIMARY, 0);
         } else {
             snprintf(signal_text, sizeof(signal_text), "Signal: --");
@@ -144,8 +156,14 @@ static void wifi_refresh_status_ui(void)
         if (wifi_connection_state == WIFI_CONNECTION_STATE_CONNECTING) {
             snprintf(ip_text, sizeof(ip_text), "IP: Negotiating...");
         } else if (wifi_connection_state == WIFI_CONNECTION_STATE_CONNECTED &&
-                   current_wifi_info.ip_address[0] != '\0') {
-            snprintf(ip_text, sizeof(ip_text), "IP: %s", current_wifi_info.ip_address);
+                   display_ip_address[0] != '\0') {
+            /* This display's lease, not the miner's. The screen used to
+             * render the address BAP reports, so a perfectly connected
+             * display could read "IP: --" because the *miner* had not
+             * reported one. */
+            snprintf(ip_text, sizeof(ip_text), "IP: %s", display_ip_address);
+        } else if (wifi_connection_state == WIFI_CONNECTION_STATE_CONNECTED) {
+            snprintf(ip_text, sizeof(ip_text), "IP: Negotiating...");
         } else if (wifi_connection_state == WIFI_CONNECTION_STATE_FAILED) {
             snprintf(ip_text, sizeof(ip_text), "IP: Check password");
         } else {
