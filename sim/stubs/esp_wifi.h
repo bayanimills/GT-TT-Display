@@ -15,7 +15,8 @@ typedef enum { WIFI_AUTH_OPEN = 0, WIFI_AUTH_WEP, WIFI_AUTH_WPA_PSK, WIFI_AUTH_W
                WIFI_AUTH_WPA_WPA2_PSK, WIFI_AUTH_WPA3_PSK, WIFI_AUTH_WPA2_WPA3_PSK, WIFI_AUTH_MAX } wifi_auth_mode_t;
 typedef enum { WIFI_PS_NONE = 0, WIFI_PS_MIN_MODEM } wifi_ps_type_t;
 typedef struct { uint8_t ssid[33]; uint8_t bssid[6]; int8_t rssi; wifi_auth_mode_t authmode; uint8_t primary; } wifi_ap_record_t;
-typedef struct { uint8_t ssid[32]; uint8_t password[64]; wifi_auth_mode_t threshold_authmode;
+typedef struct { uint8_t ssid[32]; uint8_t password[64]; uint8_t bssid[6]; bool bssid_set;
+                 wifi_auth_mode_t threshold_authmode;
                  struct { wifi_auth_mode_t authmode; } threshold; } wifi_sta_config_t;
 typedef union { wifi_sta_config_t sta; } wifi_config_t;
 typedef struct { int dummy; } wifi_init_config_t;

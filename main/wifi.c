@@ -22,7 +22,9 @@
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/task.h"
 #include "freertos/timers.h"
+#include <stdlib.h>
 
 static const char* TAG = "wifi_screen";
 
@@ -33,6 +35,16 @@ static uint16_t scan_count = 0;
 static bool scan_in_progress = false;
 static bool scan_completed = false;
 static bool scan_event_received = false;
+
+/* Filled in when DHCP completes and compared against the miner's address; the
+ * rest of the re-homing lives further down, beside the connection state it
+ * reads. */
+static uint32_t rehome_our_ip = 0;
+static uint32_t rehome_our_mask = 0;
+static bool rehome_parse_ipv4(const char *text, uint32_t *out);
+static void wifi_check_same_network_as_miner(void);
+
+
 
 static lv_obj_t * wifi_screen = NULL;
 static lv_obj_t * ssid_label = NULL;
@@ -324,6 +336,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         snprintf(display_ip_address, sizeof(display_ip_address), IPSTR,
                  IP2STR(&event->ip_info.ip));
+        {
+            /* Parsed from the dotted form, the same way the miner's address is,
+             * so the two are comparable without a byte-order argument. */
+            char mask_text[16];
+            snprintf(mask_text, sizeof(mask_text), IPSTR, IP2STR(&event->ip_info.netmask));
+            if (!rehome_parse_ipv4(display_ip_address, &rehome_our_ip)) rehome_our_ip = 0;
+            if (!rehome_parse_ipv4(mask_text, &rehome_our_mask)) rehome_our_mask = 0;
+        }
+        wifi_check_same_network_as_miner();
         // Don't update IP address here - use BAP-provided IP instead
         // snprintf(current_wifi_info.ip_address, sizeof(current_wifi_info.ip_address), IPSTR, IP2STR(&event->ip_info.ip));
         LV_UNUSED(event);
@@ -913,6 +934,7 @@ void wifi_update_ip(const char* ip)
         strncpy(current_wifi_info.ip_address, ip, sizeof(current_wifi_info.ip_address) - 1);
         current_wifi_info.ip_address[sizeof(current_wifi_info.ip_address) - 1] = '\0';
 
+        wifi_check_same_network_as_miner();
         if (current_wifi_info.ip_address[0] != '\0' &&
             strcmp(current_wifi_info.ip_address, "0.0.0.0") != 0) {
             wifi_set_connection_state(WIFI_CONNECTION_STATE_CONNECTED);
@@ -1045,6 +1067,134 @@ void wifi_connect_clicked(lv_event_t * e)
         BAP_send_ssid(selected_ssid);
         BAP_send_password(password);
     }
+}
+
+/* ---- staying on the miner's network ----
+ *
+ * The display takes its credentials from the miner over BAP, so it joins
+ * whatever AP answers to that SSID. When two APs share an SSID *and* a
+ * password - a phone hotspot sitting beside the house AP, say - it takes
+ * whichever is stronger and can land on a different LAN from the miner it is
+ * bolted to. Nothing on screen distinguishes them, since both are called the
+ * same thing, and the LAN feed server becomes unreachable from the network the
+ * user is actually on.
+ *
+ * After DHCP, compare our network with the miner's. If they differ, remember
+ * the BSSID we landed on, scan, and reconnect pinned to a different AP with the
+ * same SSID. Bounded: with only one AP there is nothing better to move to, and
+ * a reconnect loop would be worse than the mismatch. */
+#define WIFI_REHOME_MAX_TRIES 3
+
+static uint8_t      rehome_rejected[WIFI_REHOME_MAX_TRIES][6];
+static int          rehome_rejected_n = 0;
+static TaskHandle_t rehome_task_handle = NULL;
+
+static bool rehome_parse_ipv4(const char *text, uint32_t *out)
+{
+    unsigned a, b, c, d;
+    if (!text || !out) return false;
+    if (sscanf(text, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) return false;
+    if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+    *out = (a << 24) | (b << 16) | (c << 8) | d;
+    return true;
+}
+
+static bool rehome_bssid_rejected(const uint8_t bssid[6])
+{
+    for (int i = 0; i < rehome_rejected_n; i++) {
+        if (memcmp(rehome_rejected[i], bssid, 6) == 0) return true;
+    }
+    return false;
+}
+
+/* Runs off the event task deliberately: a blocking scan plus the record buffer
+ * do not belong on it, and this must work with the Wi-Fi screen closed, so the
+ * LVGL-side scan poller is not available either. */
+static void wifi_rehome_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        wifi_ap_record_t current = {0};
+        if (esp_wifi_sta_get_ap_info(&current) != ESP_OK) continue;
+
+        if (!rehome_bssid_rejected(current.bssid) &&
+            rehome_rejected_n < WIFI_REHOME_MAX_TRIES) {
+            memcpy(rehome_rejected[rehome_rejected_n++], current.bssid, 6);
+        }
+        ESP_LOGW(TAG, "on a different network from the miner; looking for another %s",
+                 current.ssid);
+
+        wifi_scan_config_t scan = { .ssid = current.ssid, .show_hidden = false };
+        if (esp_wifi_scan_start(&scan, true) != ESP_OK) continue;
+
+        uint16_t found = 0;
+        esp_wifi_scan_get_ap_num(&found);
+        if (found == 0) continue;
+        if (found > 16) found = 16;
+
+        wifi_ap_record_t *records = calloc(found, sizeof(wifi_ap_record_t));
+        if (!records) continue;
+        if (esp_wifi_scan_get_ap_records(&found, records) != ESP_OK) {
+            free(records);
+            continue;
+        }
+
+        /* Strongest first, so the best remaining candidate wins. */
+        const wifi_ap_record_t *pick = NULL;
+        for (int i = 0; i < found; i++) {
+            if (strcmp((const char *)records[i].ssid, current_wifi_info.ssid) != 0) continue;
+            if (rehome_bssid_rejected(records[i].bssid)) continue;
+            if (!pick || records[i].rssi > pick->rssi) pick = &records[i];
+        }
+
+        if (!pick) {
+            ESP_LOGW(TAG, "no other %s to move to; staying put",
+                     current_wifi_info.ssid);
+            free(records);
+            continue;
+        }
+
+        wifi_config_t cfg = {0};
+        strncpy((char *)cfg.sta.ssid, current_wifi_info.ssid, sizeof(cfg.sta.ssid) - 1);
+        strncpy((char *)cfg.sta.password, current_wifi_info.password,
+                sizeof(cfg.sta.password) - 1);
+        memcpy(cfg.sta.bssid, pick->bssid, 6);
+        cfg.sta.bssid_set = true;
+        ESP_LOGW(TAG, "moving to bssid %02x:%02x:%02x:%02x:%02x:%02x rssi %d",
+                 pick->bssid[0], pick->bssid[1], pick->bssid[2],
+                 pick->bssid[3], pick->bssid[4], pick->bssid[5], pick->rssi);
+        free(records);
+
+        if (esp_wifi_set_config(WIFI_IF_STA, &cfg) != ESP_OK) continue;
+        wifi_connect_pending = true;
+        esp_wifi_disconnect();
+        esp_wifi_connect();
+    }
+}
+
+/* Called once our address is known and again when the miner reports its own,
+ * because the two arrive in either order. */
+static void wifi_check_same_network_as_miner(void)
+{
+    uint32_t miner = 0;
+    if (!rehome_our_ip || !rehome_our_mask) return;
+    if (!rehome_parse_ipv4(current_wifi_info.ip_address, &miner) || miner == 0) return;
+
+    if ((rehome_our_ip & rehome_our_mask) == (miner & rehome_our_mask)) {
+        rehome_rejected_n = 0;   /* where we want to be; forget the rejects */
+        return;
+    }
+    if (rehome_rejected_n >= WIFI_REHOME_MAX_TRIES) {
+        ESP_LOGW(TAG, "still not on the miner's network after %d tries; accepting",
+                 WIFI_REHOME_MAX_TRIES);
+        return;
+    }
+    if (!rehome_task_handle) {
+        xTaskCreate(wifi_rehome_task, "wifi_rehome", 4096, NULL, 4, &rehome_task_handle);
+    }
+    if (rehome_task_handle) xTaskNotifyGive(rehome_task_handle);
 }
 
 static void wifi_try_connect_from_bap(void)
